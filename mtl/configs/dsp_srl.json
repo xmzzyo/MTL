@@ -1,0 +1,220 @@
+{
+  "task_dsp": {
+    "task_description": {
+      "task_name": "dsp",
+      "validation_metric_name": "LAS",
+      "validation_metric_decreases": false,
+      "evaluate_on_test": true
+    },
+    "data_params": {
+      "dataset_reader": {
+        "type": "conllu_ud",
+        "use_language_specific_pos": true,
+        "dataset_type": "dsp"
+      },
+      "train_data_path": "mtl/data/dep/PMT-train.conllu",
+      "validation_data_path": "mtl/data/dep/PMT-dev.conllu",
+      "test_data_path": "mtl/data/dep/PMT-test.conllu",
+      "datasets_for_vocab_creation": [
+        "train",
+        "validation",
+        "test"
+      ]
+    }
+  },
+  "task_srl": {
+    "task_description": {
+      "task_name": "srl",
+      "validation_metric_name": "LAS",
+      "validation_metric_decreases": false,
+      "evaluate_on_test": true
+    },
+    "data_params": {
+      "dataset_reader": {
+        "type": "conllu_ud",
+        "use_language_specific_pos": true,
+        "dataset_type": "srl"
+      },
+      "train_data_path": "mtl/data/srl/PMT-srl-train.conllu",
+      "validation_data_path": "mtl/data/srl/PMT-srl-dev.conllu",
+      "test_data_path": "mtl/data/srl/PMT-srl-test.conllu",
+      "datasets_for_vocab_creation": [
+        "train",
+        "validation",
+        "test"
+      ]
+    }
+  },
+  "model": {
+    "type": "joint_biaffine",
+    "text_field_embedder": {
+      "tokens": {
+        "type": "embedding",
+        "embedding_dim": 100,
+        "sparse": true,
+        "trainable": false
+      }
+    },
+    "arc_representation_dim": 500,
+    "tag_representation_dim": 100,
+    "dropout": 0.3,
+    "encoder": {
+      "type": "stacked_bidirectional_lstm",
+      "hidden_size": 400,
+      "input_size": 200,
+      "num_layers": 3,
+      "recurrent_dropout_probability": 0.3,
+      "use_highway": true
+    },
+    "input_dropout": 0.3,
+    "dsp": {
+      "pos_tag_embedding": {
+        "embedding_dim": 100,
+        "sparse": true,
+        "vocab_namespace": "pos"
+      },
+      "initializer": [
+        [
+          ".*feedforward.*weight",
+          {
+            "type": "xavier_uniform"
+          }
+        ],
+        [
+          ".*feedforward.*bias",
+          {
+          }
+        ],
+        [
+          ".*tag_bilinear.*weight",
+          {
+            "type": "xavier_uniform"
+          }
+        ],
+        [
+          ".*tag_bilinear.*bias",
+          {
+            "type": "zero"
+          }
+        ],
+        [
+          ".*weight_ih.*",
+          {
+            "type": "xavier_uniform"
+          }
+        ],
+        [
+          ".*weight_hh.*",
+          {
+            "type": "orthogonal"
+          }
+        ],
+        [
+          ".*bias_ih.*",
+          {
+            "type": "zero"
+          }
+        ],
+        [
+          ".*bias_hh.*",
+          {
+            "type": "lstm_hidden_bias"
+          }
+        ]
+      ]
+    },
+    "srl": {
+      "pos_tag_embedding": {
+        "embedding_dim": 100,
+        "sparse": true,
+        "vocab_namespace": "pos"
+      },
+      "initializer": [
+        [
+          ".*feedforward.*weight",
+          {
+            "type": "xavier_uniform"
+          }
+        ],
+        [
+          ".*feedforward.*bias",
+          {
+          }
+        ],
+        [
+          ".*tag_bilinear.*weight",
+          {
+            "type": "xavier_uniform"
+          }
+        ],
+        [
+          ".*tag_bilinear.*bias",
+          {
+            "type": "zero"
+          }
+        ],
+        [
+          ".*weight_ih.*",
+          {
+            "type": "xavier_uniform"
+          }
+        ],
+        [
+          ".*weight_hh.*",
+          {
+            "type": "orthogonal"
+          }
+        ],
+        [
+          ".*bias_ih.*",
+          {
+            "type": "zero"
+          }
+        ],
+        [
+          ".*bias_hh.*",
+          {
+            "type": "lstm_hidden_bias"
+          }
+        ]
+      ]
+    }
+  },
+  "iterators": {
+    "iterator": {
+      "type": "bucket",
+      "batch_size": 128,
+      "sorting_keys": [
+        [
+          "words",
+          "num_tokens"
+        ]
+      ]
+    }
+  },
+  "multi_task_trainer": {
+    "type": "sampler_multi_task_trainer",
+    "sampling_method": "uniform",
+    "patience": 50,
+    "num_epochs": 80,
+    "min_lr": "1e-7",
+    "grad_norm": 5.0,
+    "cuda_device": -1,
+    "optimizer": {
+      "type": "dense_sparse_adam",
+      "betas": [
+        0.9,
+        0.9
+      ]
+    },
+    "scheduler": {
+      "type": "reduce_on_plateau",
+      "mode": "min",
+      "factor": 0.5,
+      "patience": 5,
+      "threshold": 0.0001,
+      "threshold_mode": "abs",
+      "verbose": true
+    }
+  }
+}
