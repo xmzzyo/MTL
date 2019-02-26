@@ -20,12 +20,12 @@ class ConlluUDReader(UniversalDependenciesDatasetReader):
     def __init__(self,
                  token_indexers: Dict[str, TokenIndexer] = None,
                  use_language_specific_pos: bool = False,
-                 dataset_type: str = "dsp",
+                 task_type: str = "dsp",
                  lazy: bool = False) -> None:
         super().__init__(lazy)
         self._token_indexers = token_indexers or {'tokens': SingleIdTokenIndexer()}
         self.use_language_specific_pos = use_language_specific_pos
-        self._dataset_type = dataset_type
+        self._task_type = task_type
 
     @overrides
     def text_to_instance(self, words: List[str], upos_tags: List[str],
@@ -56,9 +56,9 @@ class ConlluUDReader(UniversalDependenciesDatasetReader):
         if dependencies is not None:
             # We don't want to expand the label namespace with an additional dummy token, so we'll
             # always give the 'ROOT_HEAD' token a label of 'root'.
-            fields["head_tags_" + self._dataset_type] = SequenceLabelField([x[0] for x in dependencies],
-                                                                           tokens,
-                                                                           label_namespace="head_tags")
+            fields["head_tags"] = SequenceLabelField([x[0] for x in dependencies],
+                                                     tokens,
+                                                     label_namespace=self._task_type + "_head_tags")
             fields["head_indices"] = SequenceLabelField([int(x[1]) for x in dependencies],
                                                         tokens,
                                                         label_namespace="head_index_tags")

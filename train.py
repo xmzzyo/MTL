@@ -184,16 +184,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "-s",
         "--serialization_dir",
-        default="data/output_v1",
-        # required=True,
+        required=True,
         help="Directory in which to save the model and its logs.",
         type=str,
     )
     parser.add_argument(
         "-c",
         "--config_file_path",
-        default="configs/dsp_srl.json",
-        # required=True,
+        required=True,
         help="Path to parameter file describing the multi-tasked model to be trained.",
         type=str,
     )

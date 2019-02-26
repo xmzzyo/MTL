@@ -3,9 +3,9 @@
 import os
 import sys
 import logging
+import re
 from typing import Dict
 
-from allennlp.models import BiaffineDependencyParser
 from overrides import overrides
 
 import torch
@@ -16,6 +16,8 @@ from allennlp.models.model import Model
 from allennlp.modules import Seq2SeqEncoder, TextFieldEmbedder, Embedding
 from allennlp.nn import RegularizerApplicator, InitializerApplicator
 from allennlp.modules.text_field_embedders import BasicTextFieldEmbedder
+
+from mtl.models import BiaffineParser
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -56,12 +58,6 @@ class JointBiaffine(Model):
         self._dropout = params.pop('dropout')
         self._input_dropout = params.pop('input_dropout')
 
-        tags = self.vocab.get_token_to_index_vocabulary("pos")
-        punctuation_tag_indices = {tag: index for tag, index in tags.items() if tag in POS_TO_IGNORE}
-        pos_to_ignore = set(punctuation_tag_indices.values())
-        logger.info(f"Found POS tags corresponding to the following punctuation : {punctuation_tag_indices}. "
-                    "Ignoring words with these POS tags for evaluation.")
-
         ############
         # DSP Stuffs
         ############
@@ -74,14 +70,10 @@ class JointBiaffine(Model):
         pos_params = dsp_params.pop("pos_tag_embedding")
         self._pos_tag_embedding = Embedding.from_params(vocab, pos_params)
 
-        dsp_num_labels = self.vocab.get_vocab_size("head_tags_dsp")
-        dsp_tag_bilinear = torch.nn.modules.Bilinear(self._tag_representation_dim,
-                                                     self._tag_representation_dim,
-                                                     dsp_num_labels)
-
         # Tagger DSP - Biaffine Tagger
-        tagger_dsp = BiaffineDependencyParser(
+        tagger_dsp = BiaffineParser(
             vocab=vocab,
+            task_type='dsp',
             text_field_embedder=self._text_field_embedder,
             encoder=self._encoder,
             tag_representation_dim=self._tag_representation_dim,
@@ -91,8 +83,6 @@ class JointBiaffine(Model):
             input_dropout=self._input_dropout,
             initializer=self._initializer
         )
-        tagger_dsp._pos_to_ignore = pos_to_ignore
-        tagger_dsp.tag_bilinear = dsp_tag_bilinear
         self._tagger_dsp = tagger_dsp
 
         # arc shared
@@ -112,14 +102,10 @@ class JointBiaffine(Model):
         pos_params = srl_params.pop("pos_tag_embedding")
         self._pos_tag_embedding = Embedding.from_params(vocab, pos_params)
 
-        srl_num_labels = self.vocab.get_vocab_size("head_tags_srl")
-        srl_tag_bilinear = torch.nn.modules.Bilinear(self._tag_representation_dim,
-                                                     self._tag_representation_dim,
-                                                     srl_num_labels)
-
         # Tagger: EMD - CRF Tagger
-        tagger_srl = BiaffineDependencyParser(
+        tagger_srl = BiaffineParser(
             vocab=vocab,
+            task_type='srl',
             text_field_embedder=self._text_field_embedder,
             encoder=self._encoder,
             tag_representation_dim=self._tag_representation_dim,
@@ -129,8 +115,6 @@ class JointBiaffine(Model):
             input_dropout=self._input_dropout,
             initializer=self._initializer
         )
-        tagger_srl._pos_to_ignore = pos_to_ignore
-        tagger_srl.tag_bilinear = srl_tag_bilinear
         tagger_srl.arc_attention = self._arc_attention
         tagger_srl.head_arc_feedforward = self._head_arc_feedforward
         tagger_srl.child_arc_feedforward = self._child_arc_feedforward
@@ -143,6 +127,9 @@ class JointBiaffine(Model):
         # pylint: disable=arguments-differ
 
         tagger = getattr(self, "_tagger_%s" % task_name)
+        # for key in tensor_batch.keys():
+        #     key_tmp = re.sub("_" + task_name, "", key)
+        #     tensor_batch[key_tmp] = tensor_batch.pop(key)
         return tagger.forward(**tensor_batch)
 
     @overrides

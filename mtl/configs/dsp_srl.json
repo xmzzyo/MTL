@@ -10,11 +10,11 @@
       "dataset_reader": {
         "type": "conllu_ud",
         "use_language_specific_pos": true,
-        "dataset_type": "dsp"
+        "task_type": "dsp"
       },
-      "train_data_path": "mtl/data/dep/PMT-train.conllu",
-      "validation_data_path": "mtl/data/dep/PMT-dev.conllu",
-      "test_data_path": "mtl/data/dep/PMT-test.conllu",
+      "train_data_path": "data/dep/PMT-train.conllu",
+      "validation_data_path": "data/dep/PMT-dev.conllu",
+      "test_data_path": "data/dep/PMT-test.conllu",
       "datasets_for_vocab_creation": [
         "train",
         "validation",
@@ -33,11 +33,11 @@
       "dataset_reader": {
         "type": "conllu_ud",
         "use_language_specific_pos": true,
-        "dataset_type": "srl"
+        "task_type": "srl"
       },
-      "train_data_path": "mtl/data/srl/PMT-srl-train.conllu",
-      "validation_data_path": "mtl/data/srl/PMT-srl-dev.conllu",
-      "test_data_path": "mtl/data/srl/PMT-srl-test.conllu",
+      "train_data_path": "data/srl/PMT-srl-train.conllu",
+      "validation_data_path": "data/srl/PMT-srl-dev.conllu",
+      "test_data_path": "data/srl/PMT-srl-test.conllu",
       "datasets_for_vocab_creation": [
         "train",
         "validation",
@@ -50,7 +50,9 @@
     "text_field_embedder": {
       "tokens": {
         "type": "embedding",
-        "embedding_dim": 100,
+        "embedding_dim": 300,
+        "projection_dim": 100,
+        "pretrained_file": "data/sgns.renmin.word.bz2",
         "sparse": true,
         "trainable": false
       }
@@ -183,7 +185,7 @@
   "iterators": {
     "iterator": {
       "type": "bucket",
-      "batch_size": 128,
+      "batch_size": 64,
       "sorting_keys": [
         [
           "words",
@@ -199,7 +201,7 @@
     "num_epochs": 80,
     "min_lr": "1e-7",
     "grad_norm": 5.0,
-    "cuda_device": -1,
+    "cuda_device": 0,
     "optimizer": {
       "type": "dense_sparse_adam",
       "betas": [
