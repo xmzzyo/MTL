@@ -7,8 +7,8 @@ which to write the results.
 
 .. code-block:: bash
 
-   $ python test_train.py --help
-    usage: test_train.py [-h] -s SERIALIZATION_DIR -c CONFIG_FILE_PATH [-r]
+   $ python train.py --help
+    usage: train.py [-h] -s SERIALIZATION_DIR -c CONFIG_FILE_PATH [-r]
 
     optional arguments:
     -h, --help            show this help message and exit

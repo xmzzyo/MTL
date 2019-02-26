@@ -1,9 +1,6 @@
 # coding: utf-8
 
-import os
-import sys
 import logging
-import re
 from typing import Dict
 
 from overrides import overrides
@@ -13,7 +10,7 @@ import torch
 from allennlp.common import Params
 from allennlp.data import Vocabulary
 from allennlp.models.model import Model
-from allennlp.modules import Seq2SeqEncoder, TextFieldEmbedder, Embedding
+from allennlp.modules import Seq2SeqEncoder, Embedding
 from allennlp.nn import RegularizerApplicator, InitializerApplicator
 from allennlp.modules.text_field_embedders import BasicTextFieldEmbedder
 
@@ -127,9 +124,6 @@ class JointBiaffine(Model):
         # pylint: disable=arguments-differ
 
         tagger = getattr(self, "_tagger_%s" % task_name)
-        # for key in tensor_batch.keys():
-        #     key_tmp = re.sub("_" + task_name, "", key)
-        #     tensor_batch[key_tmp] = tensor_batch.pop(key)
         return tagger.forward(**tensor_batch)
 
     @overrides

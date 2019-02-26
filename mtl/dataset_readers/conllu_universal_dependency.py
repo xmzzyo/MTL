@@ -1,11 +1,7 @@
 # -*- coding: utf-8 -*-
 from typing import Dict, Tuple, List
-import logging
 
 from overrides import overrides
-from conllu.parser import parse_line, DEFAULT_FIELDS
-
-from allennlp.common.file_utils import cached_path
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
 from allennlp.data.fields import Field, TextField, SequenceLabelField, MetadataField
 from allennlp.data.instance import Instance
