@@ -16,9 +16,14 @@ from allennlp.common.checks import ConfigurationError
 from allennlp.common.util import peak_memory_mb, gpu_memory_mb
 from allennlp.models.model import Model
 
+from apex.optimizers import FP16_Optimizer
+
 from mtl.tasks import Task
 from mtl.training import MultiTaskTrainer
 
+from apex import amp
+
+# amp_handle = amp.init()
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -26,23 +31,24 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 @MultiTaskTrainer.register("sampler_multi_task_trainer")
 class SamplerMultiTaskTrainer(MultiTaskTrainer):
     def __init__(
-        self,
-        model: Model,
-        task_list: List[Task],
-        optimizer_params: Params,
-        lr_scheduler_params: Params,
-        patience: Optional[int] = None,
-        num_epochs: int = 20,
-        serialization_dir: str = None,
-        cuda_device: int = -1,
-        grad_norm: Optional[float] = None,
-        grad_clipping: Optional[float] = None,
-        min_lr: float = 0.00001,
-        no_tqdm: bool = False,
-        summary_interval: int = 50,
-        log_parameter_statistics: bool = False,
-        log_gradient_statistics: bool = False,
-        sampling_method: str = "uniform",
+            self,
+            model: Model,
+            task_list: List[Task],
+            optimizer_params: Params,
+            lr_scheduler_params: Params,
+            patience: Optional[int] = None,
+            num_epochs: int = 20,
+            serialization_dir: str = None,
+            cuda_device: int = -1,
+            gradient_accumulation_steps: int = 1,
+            grad_norm: Optional[float] = None,
+            grad_clipping: Optional[float] = None,
+            min_lr: float = 0.00001,
+            no_tqdm: bool = False,
+            summary_interval: int = 50,
+            log_parameter_statistics: bool = False,
+            log_gradient_statistics: bool = False,
+            sampling_method: str = "uniform",
     ):
 
         if sampling_method not in ["uniform", "proportional"]:
@@ -58,6 +64,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
             num_epochs=num_epochs,
             serialization_dir=serialization_dir,
             cuda_device=cuda_device,
+            gradient_accumulation_steps=gradient_accumulation_steps,
             grad_norm=grad_norm,
             grad_clipping=grad_clipping,
             min_lr=min_lr,
@@ -207,7 +214,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
 
             ### Start training epoch ###
             epoch_tqdm = tqdm.tqdm(range(total_n_tr_batches), total=total_n_tr_batches)
-            for _ in epoch_tqdm:
+            for step, _ in enumerate(epoch_tqdm):
                 task_idx = np.argmax(np.random.multinomial(1, sampling_prob))
                 task = self._task_list[task_idx]
                 task_info = self._task_infos[task._name]
@@ -220,20 +227,30 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
 
                 # Load optimizer
                 optimizer = self._optimizers[task._name]
-                optimizer.zero_grad()
+
+                # optimizer = amp_handle.wrap_optimizer(optimizer)
+
+                # optimizer = FP16_Optimizer(optimizer, dynamic_loss_scale=True)
 
                 # Get the loss for this batch
                 output_dict = self._forward(tensor_batch=batch, task=task, for_training=True)
                 assert "loss" in output_dict, "Model must return a dict containing a 'loss' key"
                 loss = output_dict["loss"]
+                if self._gradient_accumulation_steps > 1:
+                    loss /= self._gradient_accumulation_steps
+                # with amp_handle.scale_loss(loss, optimizer) as scaled_loss:
+                #     scaled_loss.backward()
+                # optimizer.backward(loss)
                 loss.backward()
                 task_info["tr_loss_cum"] += loss.item()
+                del loss
 
-                # Gradient rescaling if self._grad_norm is specified
-                self._rescale_gradients()
-
-                # Take an optimization step
-                optimizer.step()
+                if (step + 1) % self._gradient_accumulation_steps == 0:
+                    # Gradient rescaling if self._grad_norm is specified
+                    self._rescale_gradients()
+                    # Take an optimization step
+                    optimizer.step()
+                    optimizer.zero_grad()
 
                 ### Get metrics for all progress so far, update tqdm, display description ###
                 task_metrics = self._get_metrics(task=task)
@@ -336,6 +353,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                     val_output_dict = self._forward(batch, task=task, for_training=False)
                     loss = val_output_dict["loss"]
                     val_loss += loss.item()
+                    del loss
 
                     # Get metrics for all progress so far, update tqdm, display description
                     task_metrics = self._get_metrics(task=task)
@@ -450,7 +468,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
 
     @classmethod
     def from_params(
-        cls, model: Model, task_list: List[Task], serialization_dir: str, params: Params
+            cls, model: Model, task_list: List[Task], serialization_dir: str, params: Params
     ) -> "SamplerMultiTaskTrainer":
         """ Generator multi-tasks trainer from parameters.  """
 
@@ -459,6 +477,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
         patience = params.pop_int("patience", 2)
         num_epochs = params.pop_int("num_epochs", 20)
         cuda_device = params.pop_int("cuda_device", -1)
+        gradient_accumulation_steps = params.pop_int("gradient_accumulation_steps", 1)
         grad_norm = params.pop_float("grad_norm", None)
         grad_clipping = params.pop_float("grad_clipping", None)
         min_lr = params.pop_float("min_lr", 0.00001)
@@ -478,6 +497,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
             num_epochs=num_epochs,
             serialization_dir=serialization_dir,
             cuda_device=cuda_device,
+            gradient_accumulation_steps=gradient_accumulation_steps,
             grad_norm=grad_norm,
             grad_clipping=grad_clipping,
             min_lr=min_lr,

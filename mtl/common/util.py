@@ -4,11 +4,13 @@
 Various utilities that don't fit anwhere else.
 """
 
-from typing import List
+from typing import List, Dict
 
+import torch
 from allennlp.common.params import Params
 from allennlp.data import Vocabulary
 from allennlp.data.iterators import DataIterator
+from torch import Tensor
 
 from mtl.tasks import Task
 
@@ -48,3 +50,24 @@ def create_and_set_iterators(params: Params, task_list: List[Task], vocab: Vocab
             task.set_data_iterator(default_iterator)
 
     return task_list
+
+
+def tensor2HalfTensor(tensor):
+    if isinstance(tensor, Tensor) and tensor.type == torch.float:
+        return tensor.half()
+    if isinstance(tensor, Dict):
+        for key, value in tensor.items():
+            tensor[key] = tensor2HalfTensor(value)
+        return tensor
+    if isinstance(tensor, List):
+        return [tensor2HalfTensor(t) for t in tensor]
+    else:
+        return tensor
+
+
+def BN_convert_float(module):
+    if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+        module.float()
+    for child in module.children():
+        BN_convert_float(child)
+    return module

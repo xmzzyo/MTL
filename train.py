@@ -31,6 +31,8 @@ import torch
 import logging
 from typing import List, Dict, Any, Tuple
 
+from apex.fp16_utils import BN_convert_float
+
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
 )
@@ -208,6 +210,18 @@ if __name__ == "__main__":
         action="store_true",
         default=False
     )
+    parser.add_argument(
+        '--fp16',
+        action='store_true',
+        default=True,
+        help="Whether to use 16-bit float precision instead of 32-bit")
+    parser.add_argument(
+        '-ls',
+        '--loss_scale',
+        type=float, default=0,
+        help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
+             "0 (default value): dynamic loss scaling.\n"
+             "Positive power of 2: static loss scaling value.\n")
     args = parser.parse_args()
 
     params = Params.from_file(params_file=args.config_file_path)
@@ -230,7 +244,15 @@ if __name__ == "__main__":
     ### Create model ###
     model_params = params.pop("model")
     model = Model.from_params(vocab=vocab, params=model_params, regularizer=regularizer)
-
+    # if args.fp16:
+    # from apex import amp
+    # amp_handler = amp.init(enabled=True)
+    # model.half()
+    # for layer in model.modules():
+    #     BN_convert_float(layer)
+    #     for para in model.parameters():
+    #         if para.data.type == torch.float:
+    #             para.half()
     ### Create multi-tasks trainer ###
     multi_task_trainer_params = params.pop("multi_task_trainer")
     trainer = MultiTaskTrainer.from_params(

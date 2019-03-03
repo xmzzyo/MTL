@@ -19,8 +19,9 @@ from allennlp.training.optimizers import Optimizer
 from allennlp.training.trainer import sparse_clip_norm, TensorboardWriter
 from allennlp.models.model import Model
 from allennlp.common.registrable import Registrable
+from torch import Tensor
 
-
+from mtl.common.util import tensor2HalfTensor
 from mtl.tasks import Task
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -37,6 +38,7 @@ class MultiTaskTrainer(Registrable):
         num_epochs: int = 20,
         serialization_dir: str = None,
         cuda_device: int = -1,
+        gradient_accumulation_steps: int = 1,
         grad_norm: Optional[float] = None,
         grad_clipping: Optional[float] = None,
         min_lr: float = 0.00001,
@@ -107,6 +109,7 @@ class MultiTaskTrainer(Registrable):
         if self._cuda_device >= 0:
             check_for_gpu(self._cuda_device)
             self._model = self._model.cuda(self._cuda_device)
+        self._gradient_accumulation_steps = gradient_accumulation_steps
         self._grad_norm = grad_norm
         self._grad_clipping = grad_clipping
         self._min_lr = min_lr
@@ -177,6 +180,13 @@ class MultiTaskTrainer(Registrable):
 
     def _forward(self, tensor_batch: torch.Tensor, for_training: bool = False, task: Task = None):
         if task is not None:
+            # tensor_batch = tensor2HalfTensor(tensor_batch)
+            # for k, val in tensor_batch.items():
+            #     if isinstance(val, Dict):
+            #         for key, value in val.items():
+            #             print(key, value.dtype)
+            #     if isinstance(val, Tensor):
+            #         print(k, val.dtype)
             tensor_batch = move_to_device(tensor_batch, self._cuda_device)
             output_dict = self._model.forward(
                 task_name=task._name, tensor_batch=tensor_batch, for_training=for_training

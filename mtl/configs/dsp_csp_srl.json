@@ -45,8 +45,30 @@
       ]
     }
   },
+  "task_csp": {
+    "task_description": {
+      "task_name": "csp",
+      "validation_metric_name": "evalb_f1_measure",
+      "validation_metric_decreases": false,
+      "evaluate_on_test": true
+    },
+    "data_params": {
+      "dataset_reader": {
+        "type": "ptb_trees",
+        "use_pos_tags": true
+      },
+      "train_data_path": "data/csp/train_ctb_bi_canonical.txt",
+      "validation_data_path": "data/csp/dev_ctb_bi_canonical.txt",
+      "test_data_path": "data/csp/test_ctb_bi_canonical.txt",
+      "datasets_for_vocab_creation": [
+        "train",
+        "validation",
+        "test"
+      ]
+    }
+  },
   "model": {
-    "type": "joint_biaffine",
+    "type": "joint_dsp_csp_srl",
     "text_field_embedder": {
       "tokens": {
         "type": "embedding",
@@ -61,7 +83,7 @@
     "dropout": 0.3,
     "encoder": {
       "type": "stacked_bidirectional_lstm",
-      "hidden_size": 400,
+      "hidden_size": 250,
       "input_size": 200,
       "num_layers": 3,
       "recurrent_dropout_probability": 0.3,
@@ -177,18 +199,92 @@
           }
         ]
       ]
+    },
+    "csp": {
+      "pos_tag_embedding": {
+        "embedding_dim": 100,
+        "vocab_namespace": "pos"
+      },
+      "initializer": [
+        [
+          "tag_projection_layer.*weight",
+          {
+            "type": "xavier_normal"
+          }
+        ],
+        [
+          "feedforward_layer.*weight",
+          {
+            "type": "xavier_normal"
+          }
+        ],
+        [
+          "encoder._module.weight_ih.*",
+          {
+            "type": "xavier_normal"
+          }
+        ],
+        [
+          "encoder._module.weight_hh.*",
+          {
+            "type": "orthogonal"
+          }
+        ]
+      ],
+      "feedforward": {
+        "input_dim": 500,
+        "num_layers": 1,
+        "hidden_dims": 250,
+        "activations": "relu",
+        "dropout": 0.1
+      },
+      "span_extractor": {
+        "type": "bidirectional_endpoint",
+        "input_dim": 500
+      },
+      "evalb_directory_path": "scripts/EVALB"
     }
   },
   "iterators": {
     "iterator": {
       "type": "bucket",
-      "batch_size": 64,
+      "batch_size": 16,
       "sorting_keys": [
         [
           "words",
           "num_tokens"
         ]
       ]
+    },
+    "iterator_dsp": {
+      "type": "bucket",
+      "batch_size": 16,
+      "sorting_keys": [
+        [
+          "words",
+          "num_tokens"
+        ]
+      ]
+    },
+    "iterator_srl": {
+      "type": "bucket",
+      "batch_size": 16,
+      "sorting_keys": [
+        [
+          "words",
+          "num_tokens"
+        ]
+      ]
+    },
+    "iterator_csp": {
+      "type": "bucket",
+      "sorting_keys": [
+        [
+          "tokens",
+          "num_tokens"
+        ]
+      ],
+      "batch_size": 16
     }
   },
   "multi_task_trainer": {
@@ -196,6 +292,7 @@
     "sampling_method": "uniform",
     "patience": 50,
     "num_epochs": 80,
+    "gradient_accumulation_steps": 1,
     "min_lr": "1e-7",
     "grad_norm": 5.0,
     "cuda_device": 0,
