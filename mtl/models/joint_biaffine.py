@@ -49,6 +49,8 @@ class JointBiaffine(Model):
         encoder = Seq2SeqEncoder.from_params(encoder_params)
         self._encoder = encoder
 
+        self._group_shared_matrix = torch.FloatTensor()
+
         self._tag_representation_dim = params.pop('tag_representation_dim')
         self._arc_representation_dim = params.pop('arc_representation_dim')
 
@@ -132,5 +134,5 @@ class JointBiaffine(Model):
         return task_tagger.get_metrics(reset)
 
     @classmethod
-    def from_params(cls, vocab: Vocabulary, params: Params, regularizer: RegularizerApplicator) -> "LayerNerEmd":
+    def from_params(cls, vocab: Vocabulary, params: Params, regularizer: RegularizerApplicator) -> Model:
         return cls(vocab=vocab, params=params, regularizer=regularizer)

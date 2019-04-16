@@ -16,7 +16,6 @@ from allennlp.modules import Seq2SeqEncoder, Embedding, FeedForward
 from allennlp.nn import RegularizerApplicator, InitializerApplicator
 from allennlp.modules.text_field_embedders import BasicTextFieldEmbedder
 
-from mtl.models import PhraseParser
 from mtl.models import BiaffineParser
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -178,5 +177,5 @@ class JointDCS(Model):
         return task_tagger.get_metrics(reset)
 
     @classmethod
-    def from_params(cls, vocab: Vocabulary, params: Params, regularizer: RegularizerApplicator) -> "LayerNerEmd":
+    def from_params(cls, vocab: Vocabulary, params: Params, regularizer: RegularizerApplicator) -> Model:
         return cls(vocab=vocab, params=params, regularizer=regularizer)

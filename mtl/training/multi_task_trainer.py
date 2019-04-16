@@ -4,6 +4,9 @@ import os
 from copy import deepcopy
 import logging
 import shutil
+
+from allennlp.training.tensorboard_writer import TensorboardWriter
+from allennlp.training.util import sparse_clip_norm
 from tensorboardX import SummaryWriter
 
 from typing import List, Optional, Dict, Tuple
@@ -16,12 +19,8 @@ from allennlp.common.checks import ConfigurationError, check_for_gpu
 from allennlp.nn.util import device_mapping, move_to_device
 from allennlp.training.learning_rate_schedulers import LearningRateScheduler
 from allennlp.training.optimizers import Optimizer
-from allennlp.training.trainer import sparse_clip_norm, TensorboardWriter
 from allennlp.models.model import Model
 from allennlp.common.registrable import Registrable
-from torch import Tensor
-
-from mtl.common.util import tensor2HalfTensor
 from mtl.tasks import Task
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -121,12 +120,12 @@ class MultiTaskTrainer(Registrable):
         self._no_tqdm = no_tqdm
 
         self._summary_interval = summary_interval  # num batches between logging to tensorboard
-        self._log_parameter_statistics = log_parameter_statistics
-        self._log_gradient_statistics = log_gradient_statistics
+        # self._log_parameter_statistics = log_parameter_statistics
+        # self._log_gradient_statistics = log_gradient_statistics
         self._global_step = 0
-        train_log = SummaryWriter(os.path.join(self._serialization_dir, "log", "train"))
-        validation_log = SummaryWriter(os.path.join(self._serialization_dir, "log", "validation"))
-        self._tensorboard = TensorboardWriter(train_log=train_log, validation_log=validation_log)
+        # train_log = SummaryWriter(os.path.join(self._serialization_dir, "log", "train"))
+        # validation_log = SummaryWriter(os.path.join(self._serialization_dir, "log", "validation"))
+        # self._tensorboard = TensorboardWriter(train_log=train_log, validation_log=validation_log)
 
     def train(
         self,
@@ -189,7 +188,7 @@ class MultiTaskTrainer(Registrable):
             #         print(k, val.dtype)
             tensor_batch = move_to_device(tensor_batch, self._cuda_device)
             output_dict = self._model.forward(
-                task_name=task._name, tensor_batch=tensor_batch, for_training=for_training
+                task_name=task._name, tensor_batch=tensor_batch
             )
             if for_training:
                 try:

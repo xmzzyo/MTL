@@ -7,6 +7,8 @@ import logging
 import numpy as np
 
 from typing import List, Optional, Dict
+
+from allennlp.nn.util import get_device_of
 from overrides import overrides
 
 import tqdm
@@ -261,40 +263,40 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 epoch_tqdm.set_description(task._name + ", " + description)
 
                 ### Tensorboard logging: Training detailled metrics, parameters and gradients ###
-                if self._global_step % self._summary_interval == 0:
-                    # Metrics
-                    for metric_name, value in task_metrics.items():
-                        self._tensorboard.add_train_scalar(
-                            name="training_details/" + task._name + "/" + metric_name,
-                            value=value,
-                            global_step=self._global_step,
-                        )
-                    # Parameters and Gradients
-                    for param_name, param in self._model.named_parameters():
-                        if self._log_parameter_statistics:
-                            self._tensorboard.add_train_scalar(
-                                name="parameter_mean/" + param_name,
-                                value=param.data.mean(),
-                                global_step=self._global_step,
-                            )
-                            self._tensorboard.add_train_scalar(
-                                name="parameter_std/" + param_name,
-                                value=param.data.std(),
-                                global_step=self._global_step,
-                            )
-                        if param.grad is None:
-                            continue
-                        if self._log_gradient_statistics:
-                            self._tensorboard.add_train_scalar(
-                                name="grad_mean/" + param_name,
-                                value=param.grad.data.mean(),
-                                global_step=self._global_step,
-                            )
-                            self._tensorboard.add_train_scalar(
-                                name="grad_std/" + param_name,
-                                value=param.grad.data.std(),
-                                global_step=self._global_step,
-                            )
+                # if self._global_step % self._summary_interval == 0:
+                #     # Metrics
+                #     for metric_name, value in task_metrics.items():
+                #         self._tensorboard.add_train_scalar(
+                #             name="training_details/" + task._name + "/" + metric_name,
+                #             value=value,
+                #             global_step=self._global_step,
+                #         )
+                #     # Parameters and Gradients
+                #     for param_name, param in self._model.named_parameters():
+                #         if self._log_parameter_statistics:
+                #             self._tensorboard.add_train_scalar(
+                #                 name="parameter_mean/" + param_name,
+                #                 value=param.data.mean(),
+                #                 global_step=self._global_step,
+                #             )
+                #             self._tensorboard.add_train_scalar(
+                #                 name="parameter_std/" + param_name,
+                #                 value=param.data.std(),
+                #                 global_step=self._global_step,
+                #             )
+                #         if param.grad is None:
+                #             continue
+                #         if self._log_gradient_statistics:
+                #             self._tensorboard.add_train_scalar(
+                #                 name="grad_mean/" + param_name,
+                #                 value=param.grad.data.mean(),
+                #                 global_step=self._global_step,
+                #             )
+                #             self._tensorboard.add_train_scalar(
+                #                 name="grad_std/" + param_name,
+                #                 value=param.grad.data.std(),
+                #                 global_step=self._global_step,
+                #             )
                 self._global_step += 1
 
             ### Bookkeeping all the training metrics for all the tasks on the training epoch that just finished ###
@@ -314,15 +316,15 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 )
 
                 # Tensorboard - Training metrics for this epoch
-                self._tensorboard.add_train_scalar(
-                    name="training_proportions/" + task._name,
-                    value=task_info["n_batches_trained_this_epoch"],
-                    global_step=n_epoch,
-                )
-                for metric_name, value in all_tr_metrics[task._name].items():
-                    self._tensorboard.add_train_scalar(
-                        name="task_" + task._name + "/" + metric_name, value=value, global_step=n_epoch
-                    )
+                # self._tensorboard.add_train_scalar(
+                #     name="training_proportions/" + task._name,
+                #     value=task_info["n_batches_trained_this_epoch"],
+                #     global_step=n_epoch,
+                # )
+                # for metric_name, value in all_tr_metrics[task._name].items():
+                #     self._tensorboard.add_train_scalar(
+                #         name="task_" + task._name + "/" + metric_name, value=value, global_step=n_epoch
+                #     )
 
             logger.info("Train - End")
 
@@ -370,10 +372,10 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 all_val_metrics[task._name]["loss"] = float(val_loss / n_batches_val_this_epoch_this_task)
 
                 # Tensorboard - Validation metrics for this epoch
-                for metric_name, value in all_val_metrics[task._name].items():
-                    self._tensorboard.add_validation_scalar(
-                        name="task_" + task._name + "/" + metric_name, value=value, global_step=n_epoch
-                    )
+                # for metric_name, value in all_val_metrics[task._name].items():
+                #     self._tensorboard.add_validation_scalar(
+                #         name="task_" + task._name + "/" + metric_name, value=value, global_step=n_epoch
+                #     )
 
                 ### Perform a patience check and update the history of validation metric for this tasks ###
                 this_epoch_val_metric = all_val_metrics[task._name][task._val_metric]

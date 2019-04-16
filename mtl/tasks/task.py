@@ -1,10 +1,10 @@
 # coding: utf-8
 
-from typing import List
+from typing import List, Dict
 from allennlp.common import Params
-from allennlp.commands.train import datasets_from_params
 from allennlp.data.iterators import DataIterator
 from allennlp.common.checks import ConfigurationError
+from allennlp.training.util import datasets_from_params
 
 
 class Task:
@@ -86,7 +86,7 @@ class Task:
         task_name = params.pop("task_name")
         validation_metric_name = params.pop("validation_metric_name")
         validation_metric_decreases = params.pop_bool("validation_metric_decreases", False)
-        evaluate_on_test = params.pop_bool("evaluate_on_test", False)
+        evaluate_on_test = params.pop_bool("evaluate_on_test", True)
 
         params.assert_empty(cls.__name__)
         return cls(
