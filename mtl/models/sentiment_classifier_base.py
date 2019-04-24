@@ -23,32 +23,68 @@ from allennlp.models.model import Model
 from allennlp.nn import InitializerApplicator, RegularizerApplicator, Activation
 from allennlp.nn import util
 from allennlp.training.metrics import CategoricalAccuracy
+from torch import nn
 from torch.nn import Dropout
 
 
-class SentimentClassifier(Model):
-    """
-    Parameters
-    ----------
-    vocab : ``Vocabulary``, required
-        A Vocabulary, required in order to compute sizes for input/output projections.
-    text_field_embedder : ``TextFieldEmbedder``, required
-        Used to embed the ``tokens`` ``TextField`` we get as input to the model.
-    encoder : ``Seq2VecEncoder``
-        The encoder that we will use to convert the sentence to a vector.
-    initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
-        Used to initialize the model parameters.
-    regularizer : ``RegularizerApplicator``, optional (default=``None``)
-        If provided, will be used to calculate the regularization penalty during training.
-    """
-
-    def __init__(self, vocab: Vocabulary,
+class Encoder(Model):
+    def __init__(self,
+                 vocab: Vocabulary,
                  text_field_embedder: TextFieldEmbedder,
-                 seq2vec_encoder: Seq2VecEncoder,
-                 shared_encoder: Seq2SeqEncoder = None,
-                 private_encoder: Seq2SeqEncoder = None,
+                 shared_encoder: Seq2VecEncoder,
+                 private_encoder: Seq2VecEncoder,
                  with_domain_embedding: bool = True,
                  domain_embeddings: Embedding = None,
+                 input_dropout: float = 0.0,
+                 regularizer: RegularizerApplicator = None) -> None:
+        super(Encoder, self).__init__(vocab, regularizer)
+        self._text_field_embedder = text_field_embedder
+        self._shared_encoder = shared_encoder
+        self._private_encoder = private_encoder
+        self._domain_embeddings = domain_embeddings
+        self._with_domain_embedding = with_domain_embedding
+        self._input_dropout = Dropout(input_dropout)
+
+    def forward(self,
+                task_index: torch.IntTensor,
+                tokens: Dict[str, torch.LongTensor]) -> Dict[str, torch.Tensor]:
+        embedded_text_input = self._text_field_embedder(tokens)
+        tokens_mask = util.get_text_field_mask(tokens)
+        batch_size = get_batch_size(tokens)
+        domain_embedding = self._domain_embeddings(task_index)
+        output_dict = {"domain_embedding": domain_embedding}
+        embedded_text_input = self._input_dropout(embedded_text_input)
+
+        shared_encoded_text = self._shared_encoder(embedded_text_input, tokens_mask)
+        output_dict["share_embedding"] = shared_encoded_text
+        private_encoded_text = self._private_encoder(embedded_text_input, tokens_mask)
+        output_dict["private_embedding"] = private_encoded_text
+
+        domain_embedding = domain_embedding.expand(batch_size, -1)
+        embedded_text = torch.cat([domain_embedding, shared_encoded_text, private_encoded_text], -1)
+        output_dict["embedded_text"] = embedded_text
+        return output_dict
+
+    def get_output_dim(self):
+        return self._domain_embeddings.get_output_dim() + self._shared_encoder.get_output_dim() \
+               + self._private_encoder.get_output_dim()
+
+
+class Discriminator(nn.Module):
+    def __init__(self, source_size, target_size):
+        super(Discriminator, self).__init__()
+        self._classifier = nn.Linear(source_size, target_size)
+
+    def forward(self, representation):
+        return self._classifier(representation)
+
+
+class SentimentClassifier(Model):
+    def __init__(self,
+                 vocab: Vocabulary,
+                 encoder: Model,
+                 s_domain_discriminator: Discriminator,
+                 p_domain_discriminator: Discriminator,
                  dropout: float = 0.0,
                  input_dropout: float = 0.0,
                  label_smoothing: float = None,
@@ -56,17 +92,12 @@ class SentimentClassifier(Model):
                  regularizer: Optional[RegularizerApplicator] = None) -> None:
         super(SentimentClassifier, self).__init__(vocab, regularizer)
 
-        self.text_field_embedder = text_field_embedder
-        self.shared_encoder = shared_encoder
-        self.private_encoder = private_encoder
-        self._seq2vec_encoder = seq2vec_encoder
-        self._domain_embeddings = domain_embeddings
-        self._with_domain_embedding = with_domain_embedding
-        self.shared_encoder_dim = shared_encoder.get_output_dim()
-        self.private_encoder_dim = private_encoder.get_output_dim()
-        self._classifier_input_dim = self._seq2vec_encoder.get_output_dim()
-        self.num_classes = self.vocab.get_vocab_size("label")
-        self.classifier_feedforward = torch.nn.Linear(self._classifier_input_dim, self.num_classes)
+        self._encoder = encoder
+
+        self._num_classes = self.vocab.get_vocab_size("label")
+        self._sentiment_discriminator = Discriminator(self._encoder.get_output_dim(), self._num_classes)
+        self._s_domain_discriminator = s_domain_discriminator
+        self._p_domain_discriminator = p_domain_discriminator
         self._dropout = InputVariationalDropout(dropout)
         self._input_dropout = Dropout(input_dropout)
 
@@ -74,56 +105,41 @@ class SentimentClassifier(Model):
             "accuracy": CategoricalAccuracy()
         }
 
-        self.loss = torch.nn.CrossEntropyLoss()
+        self._loss = torch.nn.CrossEntropyLoss()
+        self._domain_loss = torch.nn.CrossEntropyLoss()
 
         initializer(self)
 
     @overrides
     def forward(self,  # type: ignore
-                task_index: int,
+                task_index: torch.IntTensor,
                 tokens: Dict[str, torch.LongTensor],
                 label: torch.IntTensor = None) -> Dict[str, torch.Tensor]:
-        # pylint: disable=arguments-differ
-        """
-        Parameters
-        ----------
-        task_index : task index
-        tokens : Dict[str, Variable], required
-            The output of ``TextField.as_array()``.
-        label : Variable, optional (default = None)
-            A variable representing the label for each instance in the batch.
-        Returns
-        -------
-        An output dictionary consisting of:
-        class_probabilities : torch.FloatTensor
-            A tensor of shape ``(batch_size, num_classes)`` representing a distribution over the
-            label classes for each instance.
-        loss : torch.FloatTensor, optional
-            A scalar loss to be optimised.
-        """
-        embedded_text_input = self.text_field_embedder(tokens)
-        tokens_mask = util.get_text_field_mask(tokens)
-        batch_size = get_batch_size(tokens)
-        domain_embedding = self._domain_embeddings(task_index)
-        if self._with_domain_embedding:
-            domain_embedding = domain_embedding.expand(batch_size, 1, self.text_field_embedder.get_output_dim())
-            # Concatenate the domain embedding onto the sentence representation.
-            embedded_text_input = torch.cat((domain_embedding, embedded_text_input), 1)
-            tokens_mask = torch.cat([tokens_mask.new_ones(batch_size, 1), tokens_mask], 1)
-            embedded_text_input = self._input_dropout(embedded_text_input)
-        shared_encoded_text = self.shared_encoder(embedded_text_input, tokens_mask)
-        # TODO compare whether to add domain embedding into private representation
-        private_encoded_text = self.private_encoder(embedded_text_input, tokens_mask)
 
-        embedded_text = self._seq2vec_encoder(torch.cat([shared_encoded_text, private_encoded_text], -1),
-                                              mask=tokens_mask)
-        logits = self.classifier_feedforward(embedded_text)
-        output_dict = {'logits': logits}
+        embeddeds = self._encoder(task_index, tokens)
+        batch_size = get_batch_size(embeddeds["embedded_text"])
+
+        sentiment_logits = self._sentiment_discriminator(embeddeds["embedded_text"])
+
+        p_domain_logits = self._p_domain_discriminator(embeddeds["private_embedding"])
+
+        s_domain_logits = self._s_domain_discriminator(embeddeds["share_embedding"])
+
+        # domain_logits = self._domain_discriminator(embedded_text)
+        output_dict = {'logits': sentiment_logits}
         if label is not None:
-            loss = self.loss(logits, label.long().view(-1))
+            loss = self._loss(sentiment_logits, label)
             for metric in self.metrics.values():
-                metric(logits, label)
-            output_dict["loss"] = loss
+                metric(sentiment_logits, label)
+            output_dict["sentiment_loss"] = loss
+            # task_index = task_index.unsqueeze(0)
+            task_index = task_index.expand(batch_size)
+            # print(p_domain_logits.shape, task_index, task_index.shape)
+            p_domain_loss = self._domain_loss(p_domain_logits, task_index)
+            output_dict["p_domain_loss"] = p_domain_loss
+            s_domain_loss = self._domain_loss(s_domain_logits, task_index)
+            output_dict["s_domain_loss"] = s_domain_loss
+            output_dict["loss"] = (loss + p_domain_loss) / 2
 
         return output_dict
 

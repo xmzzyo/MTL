@@ -3,11 +3,11 @@
 # A modified version of the trainer showcased in GLUE: https://github.com/nyu-mll/GLUE-baselines
 
 import time
-import logging
 import numpy as np
 
 from typing import List, Optional, Dict
 
+import torch
 from allennlp.nn.util import get_device_of
 from overrides import overrides
 
@@ -17,41 +17,43 @@ from allennlp.common import Params
 from allennlp.common.checks import ConfigurationError
 from allennlp.common.util import peak_memory_mb, gpu_memory_mb
 from allennlp.models.model import Model
+from allennlp.training import util as training_util
 
-from apex.optimizers import FP16_Optimizer
+# from apex.optimizers import FP16_Optimizer
+from mtl.common.logger import logger
+from train_stmcls import TASKS_NAME
 
 from mtl.tasks import Task
 from mtl.training import MultiTaskTrainer
 
-from apex import amp
+
+# from apex import amp
 
 # amp_handle = amp.init()
-
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
 @MultiTaskTrainer.register("sampler_multi_task_trainer")
 class SamplerMultiTaskTrainer(MultiTaskTrainer):
-    def __init__(
-            self,
-            model: Model,
-            task_list: List[Task],
-            optimizer_params: Params,
-            lr_scheduler_params: Params,
-            patience: Optional[int] = None,
-            num_epochs: int = 20,
-            serialization_dir: str = None,
-            cuda_device: int = -1,
-            gradient_accumulation_steps: int = 1,
-            grad_norm: Optional[float] = None,
-            grad_clipping: Optional[float] = None,
-            min_lr: float = 0.00001,
-            no_tqdm: bool = False,
-            summary_interval: int = 50,
-            log_parameter_statistics: bool = False,
-            log_gradient_statistics: bool = False,
-            sampling_method: str = "uniform",
-    ):
+    def __init__(self,
+                 model: Model,
+                 task_list: List[Task],
+                 optimizer_params: Params,
+                 lr_scheduler_params: Params,
+                 patience: Optional[int] = None,
+                 num_epochs: int = 20,
+                 serialization_dir: str = None,
+                 cuda_device: int = -1,
+                 gradient_accumulation_steps: int = 1,
+                 grad_norm: Optional[float] = None,
+                 grad_clipping: Optional[float] = None,
+                 min_lr: float = 0.00001,
+                 no_tqdm: bool = False,
+                 summary_interval: int = 50,
+                 histogram_interval: int = 50,
+                 log_parameter_statistics: bool = False,
+                 log_gradient_statistics: bool = False,
+                 sampling_method: str = "uniform",
+                 ):
 
         if sampling_method not in ["uniform", "proportional"]:
             raise ConfigurationError(f"Sampling method ({sampling_method}) must be `uniform` or `proportional`.")
@@ -72,6 +74,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
             min_lr=min_lr,
             no_tqdm=no_tqdm,
             summary_interval=summary_interval,
+            histogram_interval=histogram_interval,
             log_parameter_statistics=log_parameter_statistics,
             log_gradient_statistics=log_gradient_statistics,
         )
@@ -81,9 +84,9 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
         """
         Train the different task_list, save the different checkpoints and metrics,
         and save the model at the end of training while logging the training details.
-        
+
         The metrics through the training are stored in dictionaries with the following structure:
-        
+
         all_metrics - Dict[str, str]
             task_name: val_metric
 
@@ -92,18 +95,18 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 val_metric (str): name (str)
                 hist (str): history_of_the_val_metric (List[float])
                 stopped (str): training_is_stopped (bool)
-                best (str): best_epoch_for_val_metric (Tuple(int, Dict))  
+                best (str): best_epoch_for_val_metric (Tuple(int, Dict))
 
         all_tr_metrics (Dict[str, Dict[str, float]])
             task_name (Dict[str, float])
                 metric_name (str): value (float)
-                loss: value (float)		
+                loss: value (float)
 
         all_val_metrics (Dict[str, Dict[str, float]])
             task_name (Dict[str, float])
                 metric_name (str): value (float)
                 loss (str): value (float)
-        
+
         Parameters
         ----------
         task_list: List[Task], required
@@ -123,7 +126,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
         if recover:
             try:
                 n_epoch, should_stop = self._restore_checkpoint()
-                logger.info("Loaded model from checkpoint. Starting at epoch %d", n_epoch)
+                logger.info("Loaded model from checkpoint. Starting at epoch {}", n_epoch)
             except RuntimeError:
                 raise ConfigurationError(
                     "Could not recover training from the checkpoint.  Did you mean to output to "
@@ -169,9 +172,9 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
         total_n_tr_batches = 0  # The total number of training batches across all the datasets.
         for task_name, info in self._task_infos.items():
             total_n_tr_batches += info["n_tr_batches"]
-            logger.info("Task %s:", task_name)
-            logger.info("\t%d training batches", info["n_tr_batches"])
-            logger.info("\t%d validation batches", info["n_val_batches"])
+            logger.info("Task {}:", task_name)
+            logger.info("\t{} training batches", info["n_tr_batches"])
+            logger.info("\t{} validation batches", info["n_val_batches"])
 
         ### Create the training generators/iterators tqdm ###
         self._tr_generators = {}
@@ -193,6 +196,8 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
         ### Setup is ready. Training of the model can begin ###
         logger.info("Set up ready. Beginning training/validation.")
 
+        avg_accuracies = []
+
         ### Begin Training of the model ###
         while not should_stop:
             # Train one epoch (training pass + validation pass)
@@ -201,7 +206,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
 
             ### Log Infos: current epoch count and CPU/GPU usage ###
             logger.info("")
-            logger.info("Epoch %d/%d - Begin", n_epoch, self._num_epochs - 1)
+            logger.info("Epoch {}/{} - Begin", n_epoch, self._num_epochs - 1)
             logger.info(f"Peak CPU memory usage MB: {peak_memory_mb()}")
             for gpu, memory in gpu_memory_mb().items():
                 logger.info(f"GPU {gpu} memory usage MB: {memory}")
@@ -216,6 +221,8 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
 
             ### Start training epoch ###
             epoch_tqdm = tqdm.tqdm(range(total_n_tr_batches), total=total_n_tr_batches)
+            histogram_parameters = set(self._model.get_parameters_for_histogram_tensorboard_logging())
+
             for step, _ in enumerate(epoch_tqdm):
                 task_idx = np.argmax(np.random.multinomial(1, sampling_prob))
                 task = self._task_list[task_idx]
@@ -225,6 +232,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
 
                 # Call next batch to train
                 batch = next(self._tr_generators[task._name])
+                self._batch_num_total += 1
                 task_info["n_batches_trained_this_epoch"] += 1
 
                 # Load optimizer
@@ -249,9 +257,23 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
 
                 if (step + 1) % self._gradient_accumulation_steps == 0:
                     # Gradient rescaling if self._grad_norm is specified
-                    self._rescale_gradients()
+                    batch_grad_norm = self._rescale_gradients()
                     # Take an optimization step
-                    optimizer.step()
+                    if self._tensorboard.should_log_histograms_this_batch():
+                        # get the magnitude of parameter updates for logging
+                        # We need a copy of current parameters to compute magnitude of updates,
+                        # and copy them to CPU so large models won't go OOM on the GPU.
+                        param_updates = {name: param.detach().cpu().clone()
+                                         for name, param in self._model.named_parameters()}
+                        optimizer.step()
+                        for name, param in self._model.named_parameters():
+                            param_updates[name].sub_(param.detach().cpu())
+                            update_norm = torch.norm(param_updates[name].view(-1, ))
+                            param_norm = torch.norm(param.view(-1, )).cpu()
+                            self._tensorboard.add_train_scalar("gradient_update/" + name,
+                                                               update_norm / (param_norm + 1e-7))
+                    else:
+                        optimizer.step()
                     optimizer.zero_grad()
 
                 ### Get metrics for all progress so far, update tqdm, display description ###
@@ -259,8 +281,20 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 task_metrics["loss"] = float(
                     task_info["tr_loss_cum"] / (task_info["n_batches_trained_this_epoch"] + 0.000_001)
                 )
-                description = self._description_from_metrics(task_metrics)
+                description = training_util.description_from_metrics(task_metrics)
                 epoch_tqdm.set_description(task._name + ", " + description)
+
+                # Log parameter values to Tensorboard
+                if self._tensorboard.should_log_this_batch():
+                    self._tensorboard.log_parameter_and_gradient_statistics(self._model, batch_grad_norm)
+                    self._tensorboard.log_learning_rates(self._model, optimizer)
+
+                    # self._tensorboard.add_train_scalar("loss/loss_train", task_metrics["loss"])
+                    self._tensorboard.log_metrics(
+                        {"epoch_metrics/" + task._name + "/" + k: v for k, v in task_metrics.items()})
+
+                if self._tensorboard.should_log_histograms_this_batch():
+                    self._tensorboard.log_histograms(self._model, histogram_parameters)
 
                 ### Tensorboard logging: Training detailled metrics, parameters and gradients ###
                 # if self._global_step % self._summary_interval == 0:
@@ -316,15 +350,14 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 )
 
                 # Tensorboard - Training metrics for this epoch
-                # self._tensorboard.add_train_scalar(
-                #     name="training_proportions/" + task._name,
-                #     value=task_info["n_batches_trained_this_epoch"],
-                #     global_step=n_epoch,
-                # )
-                # for metric_name, value in all_tr_metrics[task._name].items():
-                #     self._tensorboard.add_train_scalar(
-                #         name="task_" + task._name + "/" + metric_name, value=value, global_step=n_epoch
-                #     )
+                self._tensorboard.add_train_scalar(
+                    name="training_proportions/" + task._name,
+                    value=task_info["n_batches_trained_this_epoch"]
+                )
+                for metric_name, value in all_tr_metrics[task._name].items():
+                    self._tensorboard.add_train_scalar(
+                        name="task_" + task._name + "/" + metric_name, value=value
+                    )
 
             logger.info("Train - End")
 
@@ -334,8 +367,10 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
 
             self._model.eval()  # Set the model into evaluation mode
 
+            avg_accuracy = 0.0
+
             for task_idx, task in enumerate(self._task_list):
-                logger.info("Validation - Task %d/%d: %s", task_idx + 1, self._n_tasks, task._name)
+                logger.info("Validation - Task {}/{}: {}", task_idx + 1, self._n_tasks, task._name)
 
                 val_loss = 0.0
                 n_batches_val_this_epoch_this_task = 0
@@ -371,11 +406,13 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                     all_val_metrics[task._name][name] = value
                 all_val_metrics[task._name]["loss"] = float(val_loss / n_batches_val_this_epoch_this_task)
 
+                avg_accuracy += task_metrics["accuracy"]
+
                 # Tensorboard - Validation metrics for this epoch
-                # for metric_name, value in all_val_metrics[task._name].items():
-                #     self._tensorboard.add_validation_scalar(
-                #         name="task_" + task._name + "/" + metric_name, value=value, global_step=n_epoch
-                #     )
+                for metric_name, value in all_val_metrics[task._name].items():
+                    self._tensorboard.add_validation_scalar(
+                        name="task_" + task._name + "/" + metric_name, value=value
+                    )
 
                 ### Perform a patience check and update the history of validation metric for this tasks ###
                 this_epoch_val_metric = all_val_metrics[task._name][task._val_metric]
@@ -389,11 +426,11 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 )
 
                 if is_best_so_far:
-                    logger.info("Best model found for %s.", task._name)
+                    logger.info("Best model found for {}.", task._name)
                     self._metric_infos[task._name]["best"] = (n_epoch, all_val_metrics)
                 if out_of_patience and not self._metric_infos[task._name]["is_out_of_patience"]:
                     self._metric_infos[task._name]["is_out_of_patience"] = True
-                    logger.info("Task %s is out of patience and vote to stop the training.", task._name)
+                    logger.info("Task {} is out of patience and vote to stop the training.", task._name)
 
                 # The LRScheduler API is agnostic to whether your schedule requires a validation metric -
                 # if it doesn't, the validation metric passed here is ignored.
@@ -402,18 +439,20 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
             logger.info("Validation - End")
 
             ### Print all training and validation metrics for this epoch ###
-            logger.info("***** Epoch %d/%d Statistics *****", n_epoch, self._num_epochs - 1)
+            logger.info("***** Epoch {}/{} Statistics *****", n_epoch, self._num_epochs - 1)
             for task in self._task_list:
-                logger.info("Statistic: %s", task._name)
+                logger.info("Statistic: {}", task._name)
                 logger.info(
-                    "\tTraining - %s: %3d",
+                    "\tTraining - {}: {:3d}",
                     "Nb batches trained",
                     self._task_infos[task._name]["n_batches_trained_this_epoch"],
                 )
                 for metric_name, value in all_tr_metrics[task._name].items():
-                    logger.info("\tTraining - %s: %3f", metric_name, value)
+                    logger.info("\tTraining - {}: {:.3f}", metric_name, value)
                 for metric_name, value in all_val_metrics[task._name].items():
-                    logger.info("\tValidation - %s: %3f", metric_name, value)
+                    logger.info("\tValidation - {}: {:.3f}", metric_name, value)
+            logger.info("***** Average accuracy is {:.6f} *****", avg_accuracy / len(TASKS_NAME))
+            avg_accuracies.append(avg_accuracy / len(TASKS_NAME))
             logger.info("**********")
 
             ### Check to see if should stop ###
@@ -422,21 +461,21 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
             for task in self._task_list:
                 # task_info = self._task_infos[tasks._name]
                 if self._optimizers[task._name].param_groups[0]["lr"] < self._min_lr:
-                    logger.info("Minimum lr hit on %s.", task._name)
-                    logger.info("Task %s vote to stop training.", task._name)
+                    logger.info("Minimum lr hit on {}.", task._name)
+                    logger.info("Task {} vote to stop training.", task._name)
                     metric_infos[task._name]["min_lr_hit"] = True
                 stop_tr = stop_tr and self._metric_infos[task._name]["min_lr_hit"]
                 stop_val = stop_val and self._metric_infos[task._name]["is_out_of_patience"]
 
             if stop_tr:
                 should_stop = True
-                logging.info("All tasks hit minimum lr. Stopping training.")
+                logger.info("All tasks hit minimum lr. Stopping training.")
             if stop_val:
                 should_stop = True
-                logging.info("All metrics ran out of patience. Stopping training.")
+                logger.info("All metrics ran out of patience. Stopping training.")
             if n_epoch >= self._num_epochs - 1:
                 should_stop = True
-                logging.info("Maximum number of epoch hit. Stopping training.")
+                logger.info("Maximum number of epoch hit. Stopping training.")
 
             self._save_checkpoint(n_epoch, should_stop)
 
@@ -444,14 +483,16 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
             # One epoch = doing N (forward + backward) pass where N is the total number of training batches.
             n_epoch += 1
 
+        logger.info("Max accuracy is {:.6f}", max(avg_accuracies))
+
         ### Summarize training at the end ###
-        logging.info("***** Training is finished *****")
-        logging.info("Stopped training after %d epochs", n_epoch)
+        logger.info("***** Training is finished *****")
+        logger.info("Stopped training after {} epochs", n_epoch)
         return_metrics = {}
         for task_name, task_info in self._task_infos.items():
             nb_epoch_trained = int(task_info["total_n_batches_trained"] / task_info["n_tr_batches"])
-            logging.info(
-                "Trained %s for %d batches ~= %d epochs",
+            logger.info(
+                "Trained {} for {} batches ~= {} epochs",
                 task_name,
                 task_info["total_n_batches_trained"],
                 nb_epoch_trained,
@@ -485,6 +526,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
         min_lr = params.pop_float("min_lr", 0.00001)
         no_tqdm = params.pop_bool("no_tqdm", False)
         summary_interval = params.pop("sumarry_interval", 50)
+        histogram_interval = params.pop("histogram_interval", 50)
         log_parameter_statistics = params.pop("log_parameter_statistics", False)
         log_gradient_statistics = params.pop("log_gradient_statistics", False)
         sampling_method = params.pop("sampling_method", "proportional")
@@ -505,6 +547,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
             min_lr=min_lr,
             no_tqdm=no_tqdm,
             summary_interval=summary_interval,
+            histogram_interval=histogram_interval,
             log_parameter_statistics=log_parameter_statistics,
             log_gradient_statistics=log_gradient_statistics,
             sampling_method=sampling_method,

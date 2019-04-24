@@ -37,15 +37,9 @@ from allennlp.common.params import Params
 from allennlp.nn import util
 from allennlp.data import Vocabulary
 
+from mtl.common.logger import logger
 from mtl.tasks import Task
 from mtl.common.util import create_and_set_iterators
-
-import logging
-
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 
 def evaluate(
@@ -95,7 +89,7 @@ def evaluate(
             description = ", ".join(["%s: %.2f" % (name, value) for name, value in metrics.items()]) + " ||"
             generator_tqdm.set_description(description, refresh=False)
 
-        metrics = model.get_metrics(task_name=task_name, reset=True, full=True)
+        metrics = model.get_metrics(task_name=task_name, reset=True)
         metrics["loss"] = float(eval_loss / nb_batches)
         return metrics
 
@@ -125,7 +119,7 @@ if __name__ == "__main__":
     task_keys = [key for key in params.keys() if re.search("^task_", key)]
 
     for key in task_keys:
-        logger.info("Creating %s", key)
+        logger.info("Creating {}", key)
         task_params = params.pop(key)
         task_description = task_params.pop("task_description")
         task_data_params = task_params.pop("data_params")
@@ -157,12 +151,12 @@ if __name__ == "__main__":
         if not task._evaluate_on_test:
             continue
 
-        logger.info("Task %s will be evaluated using the best epoch weights.", task._name)
+        logger.info("Task {} will be evaluated using the best epoch weights.", task._name)
         assert (
             task._test_data is not None
         ), "Task {} wants to be evaluated on test dataset but no there is no test data loaded.".format(task._name)
 
-        logger.info("Loading the best epoch weights for tasks %s", task._name)
+        logger.info("Loading the best epoch weights for tasks {}", task._name)
         best_model_state_path = os.path.join(args.serialization_dir, "best_{}.th".format(task._name))
         best_model_state = torch.load(best_model_state_path)
         best_model = model
@@ -170,11 +164,13 @@ if __name__ == "__main__":
 
         test_metric_dict = {}
 
+        avg_accuracy = 0.0
+
         for pair_task in task_list:
             if not pair_task._evaluate_on_test:
                 continue
 
-            logger.info("Pair tasks %s is evaluated with the best model for %s", pair_task._name, task._name)
+            logger.info("Pair tasks {} is evaluated with the best model for {}", pair_task._name, task._name)
             test_metric_dict[pair_task._name] = {}
             test_metrics = evaluate(
                 model=best_model,
@@ -187,11 +183,15 @@ if __name__ == "__main__":
             for metric_name, value in test_metrics.items():
                 test_metric_dict[pair_task._name][metric_name] = value
 
+            avg_accuracy+=test_metrics["accuracy"]
+
+        logger.info("***** Average accuracy is %f *****", avg_accuracy / 3)
+
         metrics[task._name]["test"] = deepcopy(test_metric_dict)
-        logger.info("Finished evaluation of tasks %s.", task._name)
+        logger.info("Finished evaluation of tasks {}.", task._name)
 
     metrics_json = json.dumps(metrics, indent=2)
     with open(os.path.join(args.serialization_dir, "evaluate_metrics.json"), "w") as metrics_file:
         metrics_file.write(metrics_json)
 
-    logger.info("Metrics: %s", metrics_json)
+    logger.info("Metrics: {}", metrics_json)

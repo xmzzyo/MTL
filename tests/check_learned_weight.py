@@ -1,25 +1,21 @@
 # -*- coding: utf-8 -*-
+import os
+
 import torch
-from allennlp.common import Params
-from allennlp.models import Model
-from allennlp.nn import RegularizerApplicator
-from allennlp.nn.util import device_mapping
 
-from MTL.train import tasks_and_vocab_from_params
 
-serialization_dir = "../data/out/"
+model_name = "dsp_model"
 
-params = Params.from_file(params_file="../mtl/configs/dsp_srl.json")
-regularizer = RegularizerApplicator.from_params(params.pop("regularizer", []))
-tasks, vocab = tasks_and_vocab_from_params(params=params, serialization_dir=serialization_dir)
-### Create model ###
-model_params = params.pop("model")
-model = Model.from_params(vocab=vocab, params=model_params, regularizer=regularizer)
+serialization_dir = "../data/single_task_weights/"+model_name
 
-model_path = "../data/out/model_state.th"
-model_state = torch.load(model_path, map_location=device_mapping(-1))
 
-model.load_state_dict(model_state)
+model_path = os.path.join(serialization_dir, "weights.th")
 
-for name, parameter in model.named_parameters():
-    print(name)
+# model_state = torch.load(model_path, map_location=device_mapping(-1))
+# model.load_state_dict(model_state)
+
+
+state_dict = torch.load(model_path)
+
+for key, value in state_dict.items():
+    print(key, value.shape)

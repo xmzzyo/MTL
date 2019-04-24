@@ -2,12 +2,9 @@
 
 import os
 from copy import deepcopy
-import logging
 import shutil
 
 from allennlp.training.tensorboard_writer import TensorboardWriter
-from allennlp.training.util import sparse_clip_norm
-from tensorboardX import SummaryWriter
 
 from typing import List, Optional, Dict, Tuple
 
@@ -21,31 +18,32 @@ from allennlp.training.learning_rate_schedulers import LearningRateScheduler
 from allennlp.training.optimizers import Optimizer
 from allennlp.models.model import Model
 from allennlp.common.registrable import Registrable
-from mtl.tasks import Task
+from allennlp.training import util as training_util
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+from mtl.common import logger
+from mtl.tasks import Task
 
 
 class MultiTaskTrainer(Registrable):
-    def __init__(
-        self,
-        model: Model,
-        task_list: List[Task],
-        optimizer_params: Params,
-        lr_scheduler_params: Params,
-        patience: Optional[int] = None,
-        num_epochs: int = 20,
-        serialization_dir: str = None,
-        cuda_device: int = -1,
-        gradient_accumulation_steps: int = 1,
-        grad_norm: Optional[float] = None,
-        grad_clipping: Optional[float] = None,
-        min_lr: float = 0.00001,
-        no_tqdm: bool = False,
-        summary_interval: int = 50,
-        log_parameter_statistics: bool = False,
-        log_gradient_statistics: bool = False,
-    ):
+    def __init__(self,
+                 model: Model,
+                 task_list: List[Task],
+                 optimizer_params: Params,
+                 lr_scheduler_params: Params,
+                 patience: Optional[int] = None,
+                 num_epochs: int = 20,
+                 serialization_dir: str = None,
+                 cuda_device: int = -1,
+                 gradient_accumulation_steps: int = 1,
+                 grad_norm: Optional[float] = None,
+                 grad_clipping: Optional[float] = None,
+                 min_lr: float = 0.00001,
+                 no_tqdm: bool = False,
+                 summary_interval: int = 50,
+                 histogram_interval: int = 50,
+                 log_parameter_statistics: bool = False,
+                 log_gradient_statistics: bool = False,
+                 ):
         """ 
         Parameters
         ----------
@@ -127,11 +125,23 @@ class MultiTaskTrainer(Registrable):
         # validation_log = SummaryWriter(os.path.join(self._serialization_dir, "log", "validation"))
         # self._tensorboard = TensorboardWriter(train_log=train_log, validation_log=validation_log)
 
+        self._batch_num_total = 0
+        self._tensorboard = TensorboardWriter(
+            get_batch_num_total=lambda: self._batch_num_total,
+            serialization_dir=serialization_dir,
+            summary_interval=summary_interval,
+            histogram_interval=histogram_interval,
+            should_log_learning_rate=True)
+
+        # Enable activation logging.
+        if histogram_interval is not None:
+            self._tensorboard.enable_activation_logging(self._model)
+
     def train(
-        self,
-        # tasks: List[Task],
-        # params: Params,
-        recover: bool = False,
+            self,
+            # tasks: List[Task],
+            # params: Params,
+            recover: bool = False,
     ):
 
         raise NotImplementedError
@@ -215,10 +225,7 @@ class MultiTaskTrainer(Registrable):
         """
         Performs gradient rescaling. Is a no-op if gradient rescaling is not enabled.
         """
-        if self._grad_norm:
-            parameters_to_clip = [p for p in self._model.parameters() if p.grad is not None]
-            return sparse_clip_norm(parameters_to_clip, self._grad_norm)
-        return None
+        return training_util.rescale_gradients(self._model, self._grad_norm)
 
     def _enable_gradient_clipping(self) -> None:
         if self._grad_clipping is not None:
@@ -261,20 +268,20 @@ class MultiTaskTrainer(Registrable):
 
         training_path = os.path.join(self._serialization_dir, "training_state.th")
         torch.save(training_state, training_path)
-        logger.info("Checkpoint - Saved training state to %s", training_path)
+        logger.info("Checkpoint - Saved training state to {}", training_path)
 
         ### Saving model state ###
         model_path = os.path.join(self._serialization_dir, "model_state.th")
         model_state = self._model.state_dict()
         torch.save(model_state, model_path)
-        logger.info("Checkpoint - Saved model state to %s", model_path)
+        logger.info("Checkpoint - Saved model state to {}", model_path)
 
         ### Saving best models for each tasks ###
         for task_name, infos in self._metric_infos.items():
             best_epoch, _ = infos["best"]
             if best_epoch == epoch:
-                logger.info("Checkpoint - Best validation performance so far for %s tasks", task_name)
-                logger.info("Checkpoint - Copying weights to '%s/best_%s.th'.", self._serialization_dir, task_name)
+                logger.info("Checkpoint - Best validation performance so far for {} tasks", task_name)
+                logger.info("Checkpoint - Copying weights to '{}/best_{}.th'.", self._serialization_dir, task_name)
                 shutil.copyfile(model_path, os.path.join(self._serialization_dir, "best_{}.th".format(task_name)))
 
     def find_latest_checkpoint(self) -> Tuple[str, str]:
@@ -283,9 +290,9 @@ class MultiTaskTrainer(Registrable):
         If there isn't a valid checkpoint then return None.
         """
         have_checkpoint = (
-            self._serialization_dir is not None
-            and any("model_state" in x for x in os.listdir(self._serialization_dir))
-            and any("training_state" in x for x in os.listdir(self._serialization_dir))
+                self._serialization_dir is not None
+                and any("model_state" in x for x in os.listdir(self._serialization_dir))
+                and any("training_state" in x for x in os.listdir(self._serialization_dir))
         )
 
         if not have_checkpoint:
@@ -337,22 +344,22 @@ class MultiTaskTrainer(Registrable):
 
         # Load model
         self._model.load_state_dict(model_state)
-        logger.info("Checkpoint - Model loaded from %s", model_path)
+        logger.info("Checkpoint - Model loaded from {}", model_path)
 
         # Load optimizers
         for task_name, optimizers_state in training_state["optimizers"].items():
             self._optimizers[task_name].load_state_dict(optimizers_state)
-        logger.info("Checkpoint - Optimizers loaded from %s", training_state_path)
+        logger.info("Checkpoint - Optimizers loaded from {}", training_state_path)
 
         # Load schedulers
         for task_name, scheduler_state in training_state["schedulers"].items():
             self._schedulers[task_name].lr_scheduler.load_state_dict(scheduler_state)
-        logger.info("Checkpoint - Learning rate schedulers loaded from %s", training_state_path)
+        logger.info("Checkpoint - Learning rate schedulers loaded from {}", training_state_path)
 
         self._metric_infos = training_state["metric_infos"]
         self._task_infos = training_state["task_infos"]
-        logger.info("Checkpoint - Task infos loaded from %s", training_state_path)
-        logger.info("Checkpoint - Metric infos loaded from %s", training_state_path)
+        logger.info("Checkpoint - Task infos loaded from {}", training_state_path)
+        logger.info("Checkpoint - Metric infos loaded from {}", training_state_path)
 
         n_epoch, should_stop = training_state["epoch"], training_state["should_stop"]
 
@@ -360,7 +367,7 @@ class MultiTaskTrainer(Registrable):
 
     @classmethod
     def from_params(
-        cls, model: Model, task_list: List[Task], serialization_dir: str, params: Params
+            cls, model: Model, task_list: List[Task], serialization_dir: str, params: Params
     ) -> "MultiTaskTrainer":
         """
         Static method that constructs the multi tasks trainer described by ``params``.

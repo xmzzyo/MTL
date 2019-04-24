@@ -27,12 +27,25 @@ import os
 import json
 from copy import deepcopy
 import torch
-import logging
 from typing import List, Dict, Any, Tuple, Iterable
 
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
-)
+from mtl.common.logger import logger
+
+TASKS_NAME = ["apparel",
+              "baby",
+              "books",
+              "camera_photo",
+              "electronics",
+              "health_personal_care",
+              "imdb",
+              "kitchen_housewares",
+              "magazines",
+              "music",
+              "software",
+              "sports_outdoors",
+              "toys_games",
+              "video"
+              ]
 
 from mtl.tasks.task import Task
 from mtl.training import MultiTaskTrainer
@@ -44,8 +57,6 @@ from allennlp.data import Vocabulary, DatasetReader, Instance
 from allennlp.commands.train import create_serialization_dir
 from allennlp.common.params import Params
 from allennlp.nn import RegularizerApplicator
-
-logger = logging.getLogger(__name__)
 
 
 def tasks_and_vocab_from_params(params: Params, serialization_dir: str) -> Tuple[List[Task], Vocabulary]:
@@ -76,7 +87,7 @@ def tasks_and_vocab_from_params(params: Params, serialization_dir: str) -> Tuple
     data_dir = "data/mtl-dataset"
 
     for key in task_keys:
-        logger.info("Creating %s", key)
+        logger.info("Creating {}", key)
         task_data_params = Params({
             "dataset_reader": {
                 "type": "semantic_review"
@@ -102,13 +113,13 @@ def tasks_and_vocab_from_params(params: Params, serialization_dir: str) -> Tuple
 
     ### Create and save the vocabulary ###
     for task_name, task_dataset_list in datasets_for_vocab_creation.items():
-        logger.info("Creating a vocabulary using %s data from %s.", ", ".join(task_dataset_list), task_name)
+        logger.info("Creating a vocabulary using {} data from {}.", ", ".join(task_dataset_list), task_name)
 
     logger.info("Fitting vocabulary from dataset")
     vocab = Vocabulary.from_params(params.pop("vocabulary", {}), instances_for_vocab_creation)
 
     vocab.save_to_files(os.path.join(serialization_dir, "vocabulary"))
-    logger.info("Vocabulary saved to %s", os.path.join(serialization_dir, "vocabulary"))
+    logger.info("Vocabulary saved to {}", os.path.join(serialization_dir, "vocabulary"))
 
     return task_list, vocab
 
@@ -139,21 +150,21 @@ def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> 
     serialization_dir = multi_task_trainer._serialization_dir
     model = multi_task_trainer._model
 
-    ### Evaluate the model on test data if necessary ###
-    # This is a multi-tasks learning framework, the best validation metrics for one tasks are not necessarily
-    # obtained from the same epoch for all the tasks, one epoch begin equal to N forward+backward passes,
-    # where N is the total number of batches in all the training sets.
-    # We evaluate each of the best model for each tasks (based on the validation metrics) for all the other tasks (which have a test set).
+    # Evaluate the model on test data. if necessary This is a multi-tasks learning framework, the best validation
+    # metrics for one tasks are not necessarily obtained from the same epoch for all the tasks, one epoch begin equal
+    # to N forward+backward passes, where N is the total number of batches in all the training sets. We evaluate each
+    # of the best model for each tasks (based on the validation metrics) for all the other tasks (which have a test
+    # set).
     for task in task_list:
         if not task._evaluate_on_test:
             continue
 
-        logger.info("Task %s will be evaluated using the best epoch weights.", task._name)
+        logger.info("Task {} will be evaluated using the best epoch weights.", task._name)
         assert (
                 task._test_data is not None
         ), "Task {} wants to be evaluated on test dataset but no there is no test data loaded.".format(task._name)
 
-        logger.info("Loading the best epoch weights for tasks %s", task._name)
+        logger.info("Loading the best epoch weights for tasks {}", task._name)
         best_model_state_path = os.path.join(serialization_dir, "best_{}.th".format(task._name))
         best_model_state = torch.load(best_model_state_path)
         best_model = model
@@ -165,7 +176,7 @@ def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> 
             if not pair_task._evaluate_on_test:
                 continue
 
-            logger.info("Pair tasks %s is evaluated with the best model for %s", pair_task._name, task._name)
+            logger.info("Pair tasks {} is evaluated with the best model for {}", pair_task._name, task._name)
             test_metric_dict[pair_task._name] = {}
             test_metrics = evaluate(
                 model=best_model,
@@ -179,32 +190,16 @@ def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> 
                 test_metric_dict[pair_task._name][metric_name] = value
 
         metrics[task._name]["test"] = deepcopy(test_metric_dict)
-        logger.info("Finished evaluation of tasks %s.", task._name)
+        logger.info("Finished evaluation of tasks {}.", task._name)
 
     ### Dump validation and possibly test metrics ###
     metrics_json = json.dumps(metrics, indent=2)
     with open(os.path.join(serialization_dir, "metrics.json"), "w") as metrics_file:
         metrics_file.write(metrics_json)
-    logger.info("Metrics: %s", metrics_json)
+    logger.info("Metrics: {}", metrics_json)
 
     return metrics
 
-
-TASKS_NAME = ["apparel",
-              "baby",
-              "books",
-              # "camera_photo",
-              # "electronics",
-              # "health_personal_care",
-              # "imdb",
-              # "kitchen_housewares",
-              # "magazines",
-              # "music",
-              # "software",
-              # "sports_outdoors",
-              # "toys_games",
-              # "video"
-              ]
 
 if __name__ == "__main__":
     # Parse arguments
@@ -285,4 +280,4 @@ if __name__ == "__main__":
     ### Launch training ###
     metrics = train_model(multi_task_trainer=trainer, recover=args.recover)
     if metrics is not None:
-        logging.info("Training is finished ! Let's have a drink. It's on the house !")
+        logger.info("Training is finished ! Let's have a drink. It's on the house !")

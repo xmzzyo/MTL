@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 
-from apex.optimizers import FusedAdam
+# from apex.optimizers import FusedAdam
 from allennlp.training.optimizers import Optimizer
 
 # We just use the Pytorch optimizers, so here we force them into
@@ -10,5 +10,5 @@ from allennlp.training.optimizers import Optimizer
 #     "fused_adam": FusedAdam
 # }
 
-Optimizer.register("fused_adam")(FusedAdam)
+# Optimizer.register("fused_adam")(FusedAdam)
 

@@ -9,25 +9,15 @@
         "pretrained_file": "data/glove.6B.100d.txt"
       }
     },
-    "seq2vec_encoder": {
-      "type": "boe",
-      "embedding_dim": 600
-    },
     "share_encoder": {
-      "type": "stacked_bidirectional_lstm",
-      "hidden_size": 150,
-      "input_size": 100,
-      "num_layers": 1,
-      "recurrent_dropout_probability": 0.3,
-      "use_highway": true
+      "type": "cnn",
+      "embedding_dim": 100,
+      "num_filters": 50
     },
     "private_encoder": {
-      "type": "stacked_bidirectional_lstm",
-      "hidden_size": 150,
-      "input_size": 100,
-      "num_layers": 1,
-      "recurrent_dropout_probability": 0.3,
-      "use_highway": true
+      "type": "cnn",
+      "embedding_dim": 100,
+      "num_filters": 50
     },
     "dropout": 0.3,
     "input_dropout": 0.3,
@@ -61,7 +51,7 @@
     "type": "sampler_multi_task_trainer",
     "sampling_method": "proportional",
     "patience": 10,
-    "num_epochs": 80,
+    "num_epochs": 100,
     "min_lr": "1e-7",
     "grad_norm": 5.0,
     "cuda_device": 0,
