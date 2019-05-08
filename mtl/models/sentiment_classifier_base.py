@@ -259,7 +259,7 @@ class SentimentClassifier(Model):
         embeddeds = self._encoder(task_index, tokens, reverse, for_training)
         batch_size = get_batch_size(embeddeds["embedded_text"])
 
-        sentiment_logits = self._sentiment_discriminator(embeddeds["embedded_tex"])
+        sentiment_logits = self._sentiment_discriminator(embeddeds["embedded_text"])
 
         p_domain_logits = self._p_domain_discriminator(embeddeds["private_embedding"])
 
