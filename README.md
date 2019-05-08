@@ -1,3 +1,3 @@
 # MTL
 
-### Using the NLP multi task framework from [hmtl](https://github.com/huggingface/hmtl)
+### Using a NLP multi task framework modified from [hmtl](https://github.com/huggingface/hmtl)
