@@ -32,7 +32,7 @@ def split_sentiment_review():
     print(os.path.dirname(__file__))
     dir_path = "../../data/mtl-dataset"
     print(os.listdir(dir_path))
-    valid_proportion = 0.1
+    valid_proportion = 0.2
     for task in TASKS_NAME:
         filename = os.path.join(dir_path, task + ".task.train")
         train_set = []
@@ -41,7 +41,7 @@ def split_sentiment_review():
                 if line is None:
                     continue
                 train_set.append(line.strip())
-        # os.rename(filename, filename + ".bak")
+        os.rename(filename, filename + ".bak")
         val_size = int(len(train_set) * valid_proportion)
         print(val_size)
         random.shuffle(train_set)

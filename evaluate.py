@@ -43,7 +43,7 @@ from mtl.common.util import create_and_set_iterators
 
 
 def evaluate(
-    model: Model, instances: Iterable[Instance], task_name: str, data_iterator: DataIterator, cuda_device: int
+        model: Model, instances: Iterable[Instance], task_name: str, data_iterator: DataIterator, cuda_device: int
 ) -> Dict[str, Any]:
     """
     Evaluate a model for a particular tasks (usually after training).
@@ -80,17 +80,17 @@ def evaluate(
             batch = util.move_to_device(batch, cuda_device)
             nb_batches += 1
 
-            eval_output_dict = model.forward(task_name=task_name, tensor_batch=batch)
-            loss = eval_output_dict["loss"]
+            eval_output_dict = model.forward(task_name=task_name, tensor_batch=batch, for_training=False)
+            loss = eval_output_dict["stm_loss"]
             eval_loss += loss.item()
             metrics = model.get_metrics(task_name=task_name)
-            metrics["loss"] = float(eval_loss / nb_batches)
+            metrics["stm_loss"] = float(eval_loss / nb_batches)
 
             description = ", ".join(["%s: %.2f" % (name, value) for name, value in metrics.items()]) + " ||"
             generator_tqdm.set_description(description, refresh=False)
 
         metrics = model.get_metrics(task_name=task_name, reset=True)
-        metrics["loss"] = float(eval_loss / nb_batches)
+        metrics["stm_loss"] = float(eval_loss / nb_batches)
         return metrics
 
 
@@ -153,7 +153,7 @@ if __name__ == "__main__":
 
         logger.info("Task {} will be evaluated using the best epoch weights.", task._name)
         assert (
-            task._test_data is not None
+                task._test_data is not None
         ), "Task {} wants to be evaluated on test dataset but no there is no test data loaded.".format(task._name)
 
         logger.info("Loading the best epoch weights for tasks {}", task._name)
@@ -183,7 +183,7 @@ if __name__ == "__main__":
             for metric_name, value in test_metrics.items():
                 test_metric_dict[pair_task._name][metric_name] = value
 
-            avg_accuracy+=test_metrics["accuracy"]
+            avg_accuracy += test_metrics["accuracy"]
 
         logger.info("***** Average accuracy is %f *****", avg_accuracy / 3)
 

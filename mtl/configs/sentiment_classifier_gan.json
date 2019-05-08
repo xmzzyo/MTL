@@ -9,16 +9,6 @@
         "pretrained_file": "data/glove.6B.100d.txt"
       }
     },
-    "share_encoder": {
-      "type": "cnn",
-      "embedding_dim": 100,
-      "num_filters": 50
-    },
-    "private_encoder": {
-      "type": "cnn",
-      "embedding_dim": 100,
-      "num_filters": 50
-    },
     "dropout": 0.3,
     "input_dropout": 0.3,
     "initializer": [
@@ -38,7 +28,7 @@
   "iterators": {
     "iterator": {
       "type": "bucket",
-      "batch_size": 64,
+      "batch_size": 32,
       "sorting_keys": [
         [
           "tokens",
@@ -48,7 +38,6 @@
     }
   },
   "multi_task_trainer": {
-    "type": "sampler_multi_task_trainer",
     "sampling_method": "proportional",
     "patience": 10,
     "num_epochs": 80,

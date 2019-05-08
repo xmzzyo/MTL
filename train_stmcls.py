@@ -102,7 +102,7 @@ def tasks_and_vocab_from_params(params: Params, serialization_dir: str) -> Tuple
             ]
         })
 
-        task_description = Params({"task_name": key, "validation_metric_name": "accuracy"})
+        task_description = Params({"task_name": key, "validation_metric_name": "sentiment_acc"})
 
         task = Task.from_params(params=task_description)
         task_list.append(task)
@@ -155,6 +155,7 @@ def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> 
     # to N forward+backward passes, where N is the total number of batches in all the training sets. We evaluate each
     # of the best model for each tasks (based on the validation metrics) for all the other tasks (which have a test
     # set).
+    avg_accuracies = []
     for task in task_list:
         if not task._evaluate_on_test:
             continue
@@ -171,6 +172,7 @@ def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> 
         best_model.load_state_dict(state_dict=best_model_state)
 
         test_metric_dict = {}
+        avg_accuracy = 0.0
 
         for pair_task in task_list:
             if not pair_task._evaluate_on_test:
@@ -188,6 +190,9 @@ def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> 
 
             for metric_name, value in test_metrics.items():
                 test_metric_dict[pair_task._name][metric_name] = value
+            avg_accuracy += test_metrics["sentiment_acc"]
+        logger.info("Average accuracy of task {} is {}", task._name, avg_accuracy / len(task_list))
+        avg_accuracies.append(avg_accuracy / len(task_list))
 
         metrics[task._name]["test"] = deepcopy(test_metric_dict)
         logger.info("Finished evaluation of tasks {}.", task._name)
@@ -197,6 +202,7 @@ def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> 
     with open(os.path.join(serialization_dir, "metrics.json"), "w") as metrics_file:
         metrics_file.write(metrics_json)
     logger.info("Metrics: {}", metrics_json)
+    logger.info("Average accuracy is {}", sum(avg_accuracies) / len(avg_accuracies))
 
     return metrics
 

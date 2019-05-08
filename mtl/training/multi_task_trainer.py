@@ -39,8 +39,8 @@ class MultiTaskTrainer(Registrable):
                  grad_clipping: Optional[float] = None,
                  min_lr: float = 0.00001,
                  no_tqdm: bool = False,
-                 summary_interval: int = 50,
-                 histogram_interval: int = 50,
+                 summary_interval: int = 10,
+                 histogram_interval: int = 10,
                  log_parameter_statistics: bool = False,
                  log_gradient_statistics: bool = False,
                  ):

@@ -9,26 +9,6 @@
         "pretrained_file": "data/glove.6B.100d.txt"
       }
     },
-    "seq2vec_encoder": {
-      "type": "boe",
-      "embedding_dim": 600
-    },
-    "share_encoder": {
-      "type": "stacked_bidirectional_lstm",
-      "hidden_size": 150,
-      "input_size": 100,
-      "num_layers": 1,
-      "recurrent_dropout_probability": 0.3,
-      "use_highway": true
-    },
-    "private_encoder": {
-      "type": "stacked_bidirectional_lstm",
-      "hidden_size": 150,
-      "input_size": 100,
-      "num_layers": 1,
-      "recurrent_dropout_probability": 0.3,
-      "use_highway": true
-    },
     "dropout": 0.3,
     "input_dropout": 0.3,
     "initializer": [

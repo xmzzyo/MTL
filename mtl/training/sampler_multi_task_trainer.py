@@ -48,8 +48,8 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                  grad_clipping: Optional[float] = None,
                  min_lr: float = 0.00001,
                  no_tqdm: bool = False,
-                 summary_interval: int = 50,
-                 histogram_interval: int = 50,
+                 summary_interval: int = 10,
+                 histogram_interval: int = 10,
                  log_parameter_statistics: bool = False,
                  log_gradient_statistics: bool = False,
                  sampling_method: str = "uniform",
@@ -216,6 +216,9 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
             ### Reset training and trained batches counter before new training epoch ###
             for _, task_info in self._task_infos.items():
                 task_info["tr_loss_cum"] = 0.0
+                task_info['stm_loss'] = 0.0
+                task_info['p_d_loss'] = 0.0
+                task_info['s_d_loss'] = 0.0
                 task_info["n_batches_trained_this_epoch"] = 0
             all_tr_metrics = {}  # BUG TO COMPLETE COMMENT TO MAKE IT MORE CLEAR
 
@@ -253,6 +256,9 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 # optimizer.backward(loss)
                 loss.backward()
                 task_info["tr_loss_cum"] += loss.item()
+                task_info['stm_loss'] += output_dict['stm_loss'].item()
+                task_info['p_d_loss'] += output_dict['p_d_loss'].item()
+                task_info['s_d_loss'] += output_dict['s_d_loss'].item()
                 del loss
 
                 if (step + 1) % self._gradient_accumulation_steps == 0:
@@ -280,6 +286,15 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 task_metrics = self._get_metrics(task=task)
                 task_metrics["loss"] = float(
                     task_info["tr_loss_cum"] / (task_info["n_batches_trained_this_epoch"] + 0.000_001)
+                )
+                task_metrics["stm_loss"] = float(
+                    task_info["stm_loss"] / (task_info["n_batches_trained_this_epoch"] + 0.000_001)
+                )
+                task_metrics["p_d_loss"] = float(
+                    task_info["p_d_loss"] / (task_info["n_batches_trained_this_epoch"] + 0.000_001)
+                )
+                task_metrics["s_d_loss"] = float(
+                    task_info["s_d_loss"] / (task_info["n_batches_trained_this_epoch"] + 0.000_001)
                 )
                 description = training_util.description_from_metrics(task_metrics)
                 epoch_tqdm.set_description(task._name + ", " + description)
@@ -348,6 +363,15 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                 all_tr_metrics[task._name]["loss"] = float(
                     task_info["tr_loss_cum"] / (task_info["n_batches_trained_this_epoch"] + 0.000_000_01)
                 )
+                all_tr_metrics[task._name]["stm_loss"] = float(
+                    task_info["stm_loss"] / (task_info["n_batches_trained_this_epoch"] + 0.000_000_01)
+                )
+                all_tr_metrics[task._name]["p_d_loss"] = float(
+                    task_info["p_d_loss"] / (task_info["n_batches_trained_this_epoch"] + 0.000_000_01)
+                )
+                all_tr_metrics[task._name]["s_d_loss"] = float(
+                    task_info["s_d_loss"] / (task_info["n_batches_trained_this_epoch"] + 0.000_000_01)
+                )
 
                 # Tensorboard - Training metrics for this epoch
                 self._tensorboard.add_train_scalar(
@@ -406,7 +430,7 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                     all_val_metrics[task._name][name] = value
                 all_val_metrics[task._name]["loss"] = float(val_loss / n_batches_val_this_epoch_this_task)
 
-                avg_accuracy += task_metrics["accuracy"]
+                avg_accuracy += task_metrics["sentiment_acc"]
 
                 # Tensorboard - Validation metrics for this epoch
                 for metric_name, value in all_val_metrics[task._name].items():
@@ -451,8 +475,8 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
                     logger.info("\tTraining - {}: {:.3f}", metric_name, value)
                 for metric_name, value in all_val_metrics[task._name].items():
                     logger.info("\tValidation - {}: {:.3f}", metric_name, value)
-            logger.info("***** Average accuracy is {:.6f} *****", avg_accuracy / len(TASKS_NAME))
-            avg_accuracies.append(avg_accuracy / len(TASKS_NAME))
+            logger.info("***** Average accuracy is {:.6f} *****", avg_accuracy / len(self._task_list))
+            avg_accuracies.append(avg_accuracy / len(self._task_list))
             logger.info("**********")
 
             ### Check to see if should stop ###
@@ -525,8 +549,8 @@ class SamplerMultiTaskTrainer(MultiTaskTrainer):
         grad_clipping = params.pop_float("grad_clipping", None)
         min_lr = params.pop_float("min_lr", 0.00001)
         no_tqdm = params.pop_bool("no_tqdm", False)
-        summary_interval = params.pop("sumarry_interval", 50)
-        histogram_interval = params.pop("histogram_interval", 50)
+        summary_interval = params.pop("summary_interval", 10)
+        histogram_interval = params.pop("histogram_interval", 10)
         log_parameter_statistics = params.pop("log_parameter_statistics", False)
         log_gradient_statistics = params.pop("log_gradient_statistics", False)
         sampling_method = params.pop("sampling_method", "proportional")
