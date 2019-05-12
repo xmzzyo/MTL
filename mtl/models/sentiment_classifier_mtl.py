@@ -96,13 +96,14 @@ class JointSentimentClassifier(Model):
         logger.info("Multi-Task Learning Model has been instantiated.")
 
     @overrides
-    def forward(self, tensor_batch, task_name: str, reverse=False, for_training=False) -> Dict[str, torch.Tensor]:
+    def forward(self, tensor_batch, task_name: str, epoch_trained=None, reverse=False, for_training=False) -> Dict[str, torch.Tensor]:
         # pylint: disable=arguments-differ
         task_tagger = getattr(self, "_tagger_%s" % task_name)
         task_index = TASKS_NAME.index(task_name)
         tensor_batch['task_index'] = torch.tensor(task_index)
         tensor_batch["reverse"] = torch.tensor(reverse)
         tensor_batch['for_training'] = torch.tensor(for_training)
+        tensor_batch['epoch_trained'] = epoch_trained
         tensor_batch = move_to_device(tensor_batch, 0)
         return task_tagger.forward(**tensor_batch)
 

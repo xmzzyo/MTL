@@ -27,7 +27,7 @@ from allennlp.nn import InitializerApplicator, RegularizerApplicator, Activation
 from allennlp.nn import util
 from allennlp.training.metrics import CategoricalAccuracy
 from torch import nn
-from torch.autograd import Function
+from torch.autograd import Function, Variable
 from torch.nn import Dropout, LayerNorm
 
 from mtl.common.logger import logger
@@ -97,6 +97,33 @@ class CNNEncoder(Model):
                + self._private_encoder.get_output_dim()
 
 
+class GradReverse(Function):
+    def __init__(self, lambd):
+        self.lambd = lambd
+
+    def forward(self, x):
+        return x.view_as(x)
+
+    def backward(self, grad_output):
+        return self.lambd * grad_output.neg()
+
+
+def grad_reverse(x, lambd):
+    return GradReverse(lambd)(x)
+
+
+class Discriminator(nn.Module):
+    def __init__(self, source_size, target_size):
+        super(Discriminator, self).__init__()
+        self._classifier = nn.Linear(int(source_size), target_size)
+
+    def forward(self, representation, epoch_trained=None, reverse=torch.tensor(False), lambd=1.0):
+        if reverse.all():
+            # TODO increase lambda from 0
+            representation = grad_reverse(representation, lambd)
+        return self._classifier(representation)
+
+
 class RNNEncoder(Model):
     def __init__(self,
                  vocab: Vocabulary,
@@ -120,15 +147,19 @@ class RNNEncoder(Model):
     def forward(self,
                 task_index: torch.IntTensor,
                 tokens: Dict[str, torch.LongTensor],
+                epoch_trained: torch.IntTensor,
+                valid_discriminator: Discriminator,
                 reverse: torch.ByteTensor,
                 for_training: torch.ByteTensor) -> Dict[str, torch.Tensor]:
         embedded_text_input = self._text_field_embedder(tokens)
         tokens_mask = util.get_text_field_mask(tokens)
         batch_size = get_batch_size(tokens)
+        # TODO
         if np.random.rand() < 0.3 and for_training.all():
             logger.info("Domain Embedding with Perturbation")
             domain_embeddings = self._domain_embeddings(torch.arange(0, len(TASKS_NAME)).cuda())
-            domain_embedding = get_perturbation_domain_embedding(domain_embeddings, task_index)
+            domain_embedding = get_perturbation_domain_embedding(domain_embeddings, task_index, epoch_trained)
+            # domain_embedding = FGSM(self._domain_embeddings, task_index, valid_discriminator)
             output_dict = {"valid": torch.tensor(0)}
         else:
             logger.info("Domain Embedding without Perturbation")
@@ -160,10 +191,14 @@ class RNNEncoder(Model):
         return self._shared_encoder.get_output_dim() + self._private_encoder.get_output_dim()
 
 
-def get_perturbation_domain_embedding(domain_embeddings, index):
+def get_perturbation_domain_embedding(domain_embeddings, index, epoch_trained):
+    epoch_trained = epoch_trained + 1 if epoch_trained is not None else 10
     u, s, v = torch.svd(domain_embeddings)
-    noise = 0.01 * torch.normal(mean=0.5, std=torch.tensor([1.0 for _ in range(domain_embeddings.shape[0])]))
-    noise[index] = 0.0
+    noise = 0.01 * torch.normal(mean=0.5,
+                                # std=torch.std(domain_embeddings).sign_())
+                                std=torch.tensor([1.0 for _ in range(domain_embeddings.shape[0])]))
+    # TODO remove
+    noise[:2] = 0.0
     s += noise.cuda()
     reconstruct = torch.mm(torch.mm(u, torch.diag(s)), v.t())
     # logger.info("{} Embedding's mean is {}, std is {}", TASKS_NAME[index], np.mean(domain_embeddings[index]),
@@ -174,30 +209,22 @@ def get_perturbation_domain_embedding(domain_embeddings, index):
     return perturbation_domain_embedding(index)
 
 
-class GradReverse(Function):
-    def __init__(self, lambd):
-        self.lambd = lambd
-
-    def forward(self, x):
-        return x.view_as(x)
-
-    def backward(self, grad_output):
-        return self.lambd * grad_output.neg()
-
-
-def grad_reverse(x, lambd):
-    return GradReverse(lambd)(x)
-
-
-class Discriminator(nn.Module):
-    def __init__(self, source_size, target_size):
-        super(Discriminator, self).__init__()
-        self._classifier = nn.Linear(int(source_size), target_size)
-
-    def forward(self, representation, reverse=torch.tensor(False), lambd=1.0):
-        if reverse.all():
-            representation = grad_reverse(representation, lambd)
-        return self._classifier(representation)
+def FGSM(domain_embeddings, index, valid_discriminator):
+    domain_embedding = domain_embeddings(index)
+    domain_embedding = torch.tensor(domain_embedding.detach(), requires_grad=True)
+    valid_logits = valid_discriminator(domain_embedding)
+    criterion = torch.nn.BCEWithLogitsLoss()
+    valid_label = torch.tensor(0)
+    loss = criterion(valid_logits, torch.zeros(2).scatter_(0, valid_label, torch.tensor(1.0)).cuda())
+    if domain_embedding.grad is not None:
+        domain_embedding.grad.data.fill_(0)
+    loss.backward()
+    epsilon = 0.03
+    domain_embedding.grad.data.sign_()
+    domain_embedding = domain_embedding - epsilon * domain_embedding.grad
+    # domain_embedding = np.clip(domain_embedding, 0, 1)
+    # domain_embedding = torch.clamp(domain_embedding, -1, 1)
+    return domain_embedding
 
 
 class SentimentClassifier(Model):
@@ -244,7 +271,7 @@ class SentimentClassifier(Model):
 
         self._loss = torch.nn.CrossEntropyLoss()
         self._domain_loss = torch.nn.CrossEntropyLoss()
-        self._valid_loss = torch.nn.BCELoss()
+        self._valid_loss = torch.nn.BCEWithLogitsLoss()
 
         initializer(self)
 
@@ -252,11 +279,12 @@ class SentimentClassifier(Model):
     def forward(self,  # type: ignore
                 task_index: torch.IntTensor,
                 reverse: torch.ByteTensor,
+                epoch_trained: torch.IntTensor,
                 for_training: torch.ByteTensor,
                 tokens: Dict[str, torch.LongTensor],
                 label: torch.IntTensor = None) -> Dict[str, torch.Tensor]:
 
-        embeddeds = self._encoder(task_index, tokens, reverse, for_training)
+        embeddeds = self._encoder(task_index, tokens, epoch_trained, self._valid_discriminator, reverse, for_training)
         batch_size = get_batch_size(embeddeds["embedded_text"])
 
         sentiment_logits = self._sentiment_discriminator(embeddeds["embedded_text"])
@@ -264,10 +292,10 @@ class SentimentClassifier(Model):
         p_domain_logits = self._p_domain_discriminator(embeddeds["private_embedding"])
 
         # TODO set reverse = true
-        s_domain_logits = self._s_domain_discriminator(embeddeds["share_embedding"], reverse)
+        s_domain_logits = self._s_domain_discriminator(embeddeds["share_embedding"], reverse=reverse)
         # TODO set reverse = true
         # TODO use share_embedding instead of domain_embedding
-        valid_logits = self._valid_discriminator(embeddeds["domain_embedding"], reverse)
+        valid_logits = self._valid_discriminator(embeddeds["domain_embedding"], reverse=reverse)
 
         valid_label = embeddeds['valid']
 
@@ -292,13 +320,15 @@ class SentimentClassifier(Model):
                                                                 average="token",
                                                                 label_smoothing=self._label_smoothing)
             else:
-                valid_loss = self._valid_loss(valid_logits, valid_label)
+                valid_loss = self._valid_loss(valid_logits,
+                                              torch.zeros(2).scatter_(0, valid_label, torch.tensor(1.0)).cuda())
             output_dict['stm_loss'] = loss
             output_dict['p_d_loss'] = p_domain_loss
             output_dict['s_d_loss'] = s_domain_loss
             output_dict['valid_loss'] = valid_loss
-            # TODO remove valid loss -- not a generation process
+            # TODO add share domain logits std loss
             output_dict['loss'] = loss + p_domain_loss + 0.005 * s_domain_loss + 0.005 * valid_loss
+            # + torch.mean(torch.std(s_domain_logits, dim=1))
             # output_dict['loss'] = loss + p_domain_loss + 0.005 * s_domain_loss
 
             for (metric, logit, target) in zip(self.metrics.values(), logits, targets):

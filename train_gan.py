@@ -29,7 +29,7 @@ from copy import deepcopy
 import torch
 from typing import List, Dict, Any, Tuple, Iterable
 
-from mtl import GanMtlTrainer
+from mtl.training.gan_mtl_trainer import GanMtlTrainer
 from mtl.common.logger import logger
 
 TASKS_NAME = ["apparel",

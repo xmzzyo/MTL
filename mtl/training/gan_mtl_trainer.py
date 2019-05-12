@@ -107,6 +107,7 @@ class GanMtlTrainer:
             self._model = self._model.cuda(self._cuda_device)
         self._patience = patience
         self._num_epochs = num_epochs
+        self._epoch_trained = 0
 
         self._gradient_accumulation_steps = gradient_accumulation_steps
         self._grad_norm = grad_norm
@@ -539,6 +540,7 @@ class GanMtlTrainer:
             ### Update n_epoch ###
             # One epoch = doing N (forward + backward) pass where N is the total number of training batches.
             n_epoch += 1
+            self._epoch_trained = n_epoch
 
         logger.info("Max accuracy is {:.6f}", max(avg_accuracies))
 
@@ -591,7 +593,8 @@ class GanMtlTrainer:
         if task is not None:
             # tensor_batch = move_to_device(tensor_batch, self._cuda_device)
             output_dict = self._model.forward(
-                task_name=task._name, tensor_batch=tensor_batch, reverse=reverse, for_training=for_training
+                task_name=task._name, tensor_batch=tensor_batch, reverse=reverse, for_training=for_training,
+                epoch_trained=self._epoch_trained
             )
             if for_training:
                 try:
