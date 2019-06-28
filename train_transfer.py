@@ -25,12 +25,10 @@ import argparse
 import itertools
 import os
 import json
+import random
 from copy import deepcopy
 import torch
 from typing import List, Dict, Any, Tuple, Iterable
-
-from mtl.training.gan_mtl_trainer import GanMtlTrainer
-from mtl.common.logger import logger
 
 TASKS_NAME = ["apparel",
               "baby",
@@ -49,7 +47,8 @@ TASKS_NAME = ["apparel",
               ]
 
 from mtl.tasks.task import Task
-from mtl.training import MultiTaskTrainer
+from mtl.training.transfer_mtl_trainer import TransferMtlTrainer
+from mtl.common.logger import logger
 from mtl.common.util import create_and_set_iterators
 from evaluate import evaluate
 
@@ -58,6 +57,7 @@ from allennlp.data import Vocabulary, DatasetReader, Instance
 from allennlp.commands.train import create_serialization_dir
 from allennlp.common.params import Params
 from allennlp.nn import RegularizerApplicator
+import numpy as np
 
 
 def tasks_and_vocab_from_params(params: Params, serialization_dir: str) -> Tuple[List[Task], Vocabulary]:
@@ -103,7 +103,7 @@ def tasks_and_vocab_from_params(params: Params, serialization_dir: str) -> Tuple
             ]
         })
 
-        task_description = Params({"task_name": key, "validation_metric_name": "sentiment_acc"})
+        task_description = Params({"task_name": key, "validation_metric_name": "{}_stm_acc".format(key)})
 
         task = Task.from_params(params=task_description)
         task_list.append(task)
@@ -125,7 +125,7 @@ def tasks_and_vocab_from_params(params: Params, serialization_dir: str) -> Tuple
     return task_list, vocab
 
 
-def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> Dict[str, Any]:
+def train_model(multi_task_trainer: TransferMtlTrainer, recover: bool = False) -> Dict[str, Any]:
     """
     Launching the training of the multi-tasks model.
 
@@ -191,7 +191,7 @@ def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> 
 
             for metric_name, value in test_metrics.items():
                 test_metric_dict[pair_task._name][metric_name] = value
-            avg_accuracy += test_metrics["sentiment_acc"]
+            avg_accuracy += test_metrics["{}_stm_acc".format(pair_task._name)]
         logger.info("Average accuracy of task {} is {}", task._name, avg_accuracy / len(task_list))
         avg_accuracies.append(avg_accuracy / len(task_list))
 
@@ -206,6 +206,15 @@ def train_model(multi_task_trainer: MultiTaskTrainer, recover: bool = False) -> 
     logger.info("Average accuracy is {}", sum(avg_accuracies) / len(avg_accuracies))
 
     return metrics
+
+
+def setup_seed(seed=2019):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
 
 
 if __name__ == "__main__":
@@ -250,6 +259,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # TODO torch.manual_seed(args.seed)
+    setup_seed()
 
     params = Params.from_file(params_file=args.config_file_path)
     serialization_dir = args.serialization_dir
@@ -271,18 +281,9 @@ if __name__ == "__main__":
     ### Create model ###
     model_params = params.pop("model")
     model = Model.from_params(vocab=vocab, params=model_params, regularizer=regularizer)
-    # if args.fp16:
-    # from apex import amp
-    # amp_handler = amp.init(enabled=True)
-    # model.half()
-    # for layer in model.modules():
-    #     BN_convert_float(layer)
-    #     for para in model.parameters():
-    #         if para.data.type == torch.float:
-    #             para.half()
     ### Create multi-tasks trainer ###
     multi_task_trainer_params = params.pop("multi_task_trainer")
-    trainer = GanMtlTrainer.from_params(
+    trainer = TransferMtlTrainer.from_params(
         model=model, task_list=tasks, serialization_dir=serialization_dir, params=multi_task_trainer_params
     )
 

@@ -155,7 +155,7 @@ class RNNEncoder(Model):
         tokens_mask = util.get_text_field_mask(tokens)
         batch_size = get_batch_size(tokens)
         # TODO
-        if np.random.rand() < 0.3 and for_training.all():
+        if np.random.rand() < -1 and for_training.all():
             logger.info("Domain Embedding with Perturbation")
             domain_embeddings = self._domain_embeddings(torch.arange(0, len(TASKS_NAME)).cuda())
             domain_embedding = get_perturbation_domain_embedding(domain_embeddings, task_index, epoch_trained)
@@ -194,6 +194,8 @@ class RNNEncoder(Model):
 def get_perturbation_domain_embedding(domain_embeddings, index, epoch_trained):
     epoch_trained = epoch_trained + 1 if epoch_trained is not None else 10
     u, s, v = torch.svd(domain_embeddings)
+    # TODO reparameterize trick
+    # TODO VAE reconstruct domain embedding
     noise = 0.01 * torch.normal(mean=0.5,
                                 # std=torch.std(domain_embeddings).sign_())
                                 std=torch.tensor([1.0 for _ in range(domain_embeddings.shape[0])]))
@@ -271,6 +273,7 @@ class SentimentClassifier(Model):
 
         self._loss = torch.nn.CrossEntropyLoss()
         self._domain_loss = torch.nn.CrossEntropyLoss()
+        # TODO torch.nn.BCELoss
         self._valid_loss = torch.nn.BCEWithLogitsLoss()
 
         initializer(self)
@@ -312,7 +315,7 @@ class SentimentClassifier(Model):
             p_domain_loss = self._domain_loss(p_domain_logits, task_index)
             s_domain_loss = self._domain_loss(s_domain_logits, task_index)
             logger.info("Share domain logits standard variation is {}",
-                        np.mean(np.std(s_domain_logits.detach().cpu().numpy(), axis=0)))
+                        torch.mean(torch.std(F.softmax(s_domain_logits), dim=-1)))
             if self._label_smoothing is not None and self._label_smoothing > 0.0:
                 valid_loss = sequence_cross_entropy_with_logits(valid_logits,
                                                                 valid_label.unsqueeze(0).cuda(),
@@ -327,7 +330,8 @@ class SentimentClassifier(Model):
             output_dict['s_d_loss'] = s_domain_loss
             output_dict['valid_loss'] = valid_loss
             # TODO add share domain logits std loss
-            output_dict['loss'] = loss + p_domain_loss + 0.005 * s_domain_loss + 0.005 * valid_loss
+            output_dict['loss'] = loss + p_domain_loss + 0.005 * s_domain_loss\
+                                  # + 0.005 * valid_loss
             # + torch.mean(torch.std(s_domain_logits, dim=1))
             # output_dict['loss'] = loss + p_domain_loss + 0.005 * s_domain_loss
 

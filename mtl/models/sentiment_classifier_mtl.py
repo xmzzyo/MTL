@@ -74,6 +74,7 @@ class JointSentimentClassifier(Model):
 
         self._p_domain_discriminator = Discriminator(private_encoder.get_output_dim(), len(TASKS_NAME))
 
+        # TODO individual valid discriminator
         self._valid_discriminator = Discriminator(self._domain_embeddings.get_output_dim(), 2)
 
         for task in TASKS_NAME:

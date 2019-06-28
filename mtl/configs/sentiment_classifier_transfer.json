@@ -1,0 +1,59 @@
+{
+  "model": {
+    "type": "stmcls",
+    "text_field_embedder": {
+      "tokens": {
+        "type": "embedding",
+        "embedding_dim": 100,
+        "trainable": true,
+        "pretrained_file": "data/glove.6B.100d.txt"
+      }
+    },
+    "dropout": 0.3,
+    "input_dropout": 0.3,
+    "initializer": [
+      [
+        ".*feedforward.*weight",
+        {
+          "type": "xavier_uniform"
+        }
+      ],
+      [
+        ".*feedforward.*bias",
+        {
+        }
+      ]
+    ]
+  },
+  "iterators": {
+    "iterator": {
+      "type": "bucket",
+      "batch_size": 32,
+      "sorting_keys": [
+        [
+          "tokens",
+          "num_tokens"
+        ]
+      ]
+    }
+  },
+  "multi_task_trainer": {
+    "sampling_method": "proportional",
+    "patience": 10,
+    "num_epochs": 80,
+    "min_lr": "1e-7",
+    "grad_norm": 5.0,
+    "cuda_device": 0,
+    "optimizer": {
+      "type": "adam",
+      "betas": [
+        0.9,
+        0.9
+      ]
+    },
+    "scheduler": {
+      "type": "exponential",
+      "gamma": 0.5
+    }
+  }
+}

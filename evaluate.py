@@ -36,10 +36,13 @@ from allennlp.common.checks import check_for_gpu
 from allennlp.common.params import Params
 from allennlp.nn import util
 from allennlp.data import Vocabulary
+from allennlp.nn.util import move_to_device
+from allennlp.training import util as training_util
 
 from mtl.common.logger import logger
 from mtl.tasks import Task
 from mtl.common.util import create_and_set_iterators
+from train_transfer import TASKS_NAME
 
 
 def evaluate(
@@ -76,17 +79,25 @@ def evaluate(
 
         eval_loss = 0
         nb_batches = 0
-        for batch in generator_tqdm:
-            batch = util.move_to_device(batch, cuda_device)
+        for tensor_batch in generator_tqdm:
             nb_batches += 1
 
-            eval_output_dict = model.forward(task_name=task_name, tensor_batch=batch, for_training=False)
-            loss = eval_output_dict["stm_loss"]
+            train_stages = ["stm", "sd", "valid"]
+            task_index = TASKS_NAME.index(task_name)
+            tensor_batch['task_index'] = torch.tensor(task_index)
+            tensor_batch["reverse"] = torch.tensor(False)
+            tensor_batch['for_training'] = torch.tensor(False)
+            train_stage = train_stages.index("stm")
+            tensor_batch['train_stage'] = torch.tensor(train_stage)
+            tensor_batch = move_to_device(tensor_batch, 0)
+
+            eval_output_dict = model.forward(**tensor_batch)
+            loss = eval_output_dict["loss"]
             eval_loss += loss.item()
             metrics = model.get_metrics(task_name=task_name)
             metrics["stm_loss"] = float(eval_loss / nb_batches)
 
-            description = ", ".join(["%s: %.2f" % (name, value) for name, value in metrics.items()]) + " ||"
+            description = training_util.description_from_metrics(metrics)
             generator_tqdm.set_description(description, refresh=False)
 
         metrics = model.get_metrics(task_name=task_name, reset=True)
